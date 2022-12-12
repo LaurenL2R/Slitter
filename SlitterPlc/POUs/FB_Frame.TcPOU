@@ -1,0 +1,187 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.9">
+  <POU Name="FB_Frame" Id="{1e468617-d9c8-4a64-a94b-435467c18ecb}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Frame IMPLEMENTS I_Frame
+VAR_INPUT
+END_VAR
+VAR_OUTPUT
+END_VAR
+VAR
+	diControlLeft	AT %I*	: BOOL;		// start button left
+	diControlRight	AT %I*	: BOOL;		// start button right
+	doGreen			AT %Q*	: BOOL;		// solid = ready to start; blinking = sample missing on vacuum
+	diDoor1			AT %I*	: BOOL;		// door closed indicator
+	diDoor2 		AT %I*	: BOOL;		// door closed indicator
+	diDoor3			AT %I*	: BOOL;		// door closed indicator
+	diDoor4			AT %I*	: BOOL;		// door closed indicator
+	aiPressure		AT %I*	: INT;		// pressure to the system	
+	GreenTon				: TON := (PT := T#1S);
+	_pressure				: LREAL;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[]]></ST>
+    </Implementation>
+    <Method Name="BlinkGreen" Id="{ac8c3bb5-8532-4454-bf69-ef1f0aea8b60}">
+      <Declaration><![CDATA[METHOD BlinkGreen : BOOL
+VAR_INPUT
+END_VAR
+VAR_INST
+	TonGreen	: TON := (PT := T#1s);
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[TONGreen.IN := NOT TONGreen.Q;
+TONGreen();
+IF TONGreen.Q THEN
+	GreenLight := NOT GreenLight;
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="ControlLeft" Id="{2755e335-2e1f-4a01-bf88-706b63a5ad33}">
+      <Declaration><![CDATA[PROPERTY ControlLeft : BOOL
+]]></Declaration>
+      <Get Name="Get" Id="{6632454b-04e6-4dc0-b9d8-a9752abbc0d4}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[ControlLeft := diControlLeft;]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="ControlRight" Id="{e1bafaf2-39fe-4f2e-be87-72bbdb8fd305}">
+      <Declaration><![CDATA[PROPERTY ControlRight : BOOL
+]]></Declaration>
+      <Get Name="Get" Id="{38935639-4e5b-4309-896c-23e94213d8cd}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[ControlRight := diControlRight;]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="Door1" Id="{976a7457-e0f0-4690-803e-6b3137985ea3}">
+      <Declaration><![CDATA[PROPERTY Door1 : BOOL
+]]></Declaration>
+      <Get Name="Get" Id="{f6b3be95-885c-4407-8a2d-4d43e94a6b9c}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[Door1 := diDoor1;]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="Door2" Id="{5f242cec-cab0-47f8-986e-f34d2374746b}">
+      <Declaration><![CDATA[PROPERTY Door2 : BOOL
+]]></Declaration>
+      <Get Name="Get" Id="{dcd1c4b4-4831-4dfa-aac4-86e142480ecc}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[Door2 := diDoor2;]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="Door3" Id="{f3fb52ac-d2d9-4183-ab4e-47906abe8f0d}">
+      <Declaration><![CDATA[PROPERTY Door3 : BOOL
+]]></Declaration>
+      <Get Name="Get" Id="{f522df62-17d5-4b5d-a44a-a86ecf629ac0}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[Door3 := diDoor3;]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="Door4" Id="{940bc8d6-c5b6-48f3-8ecf-29a6594c52a1}">
+      <Declaration><![CDATA[PROPERTY Door4 : BOOL]]></Declaration>
+      <Get Name="Get" Id="{7e2c3a41-8b58-4e2d-9efe-3865f9b31261}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[Door4 := diDoor4;]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="GreenLight" Id="{e49a7d92-70a8-4849-84b8-b1c2660cbe27}">
+      <Declaration><![CDATA[PROPERTY GreenLight : BOOL
+]]></Declaration>
+      <Get Name="Get" Id="{a481e175-f515-498a-922a-eec8a39889ea}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[GreenLight := doGreen;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{a6aeae1f-fcfa-445e-b6f0-9133c25024be}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[doGreen := GreenLight;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="Pressure" Id="{5d566adc-7f80-4dda-abe5-92fe7eed39fd}">
+      <Declaration><![CDATA[PROPERTY Pressure : LREAL]]></Declaration>
+      <Get Name="Get" Id="{9fe9a421-e390-439d-92b1-e37f3b28f9ed}">
+        <Declaration><![CDATA[VAR
+	Slope	: LREAL;
+	Intercept : LREAL;
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[// 1 V = 0PSIG
+// 5V = 145 PSIG
+Slope := 145 / 4;
+Intercept := 145 / 4.0;
+Pressure := Slope * (INT_TO_LREAL(aiPressure) * 10 / 32767) - Intercept;
+_pressure := Pressure;]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <LineIds Name="FB_Frame">
+      <LineId Id="9" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Frame.BlinkGreen">
+      <LineId Id="5" Count="0" />
+      <LineId Id="11" Count="3" />
+    </LineIds>
+    <LineIds Name="FB_Frame.ControlLeft.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Frame.ControlRight.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Frame.Door1.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Frame.Door2.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Frame.Door3.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Frame.Door4.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Frame.GreenLight.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Frame.GreenLight.Set">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Frame.Pressure.Get">
+      <LineId Id="5" Count="2" />
+      <LineId Id="9" Count="0" />
+      <LineId Id="2" Count="0" />
+      <LineId Id="11" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

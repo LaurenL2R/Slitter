@@ -1,0 +1,17 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.9">
+  <DUT Name="ST_MandrelParameters" Id="{e9936bcb-6b6e-4f85-9b8f-fa96a6e3fc8a}">
+    <Declaration><![CDATA[TYPE ST_MandrelParameters :
+STRUCT
+	loadPositionX	: LREAL; // := -72.5;
+	velocityX		: LREAL; // := 10;
+	loadPositionY	: LREAL; // := -22;
+	velocityY		: LREAL; // := 250;
+	spindleVelocity	: LREAL; // := 20;
+	spindleOffset	: LREAL; // := -1;
+	vacuumVelocity	: LREAL; // := 360;
+END_STRUCT
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

@@ -1,0 +1,764 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.9">
+  <POU Name="FB_Ejector" Id="{1f9be33f-36d7-436d-adb4-b89b9d7ec6b1}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Ejector
+VAR_INPUT
+END_VAR
+VAR_OUTPUT
+END_VAR
+VAR	
+	axis					: FB_Axis;
+	zSlide					: FB_Actuator;	
+	_Vacuum AT %Q*			: BOOL;
+	_VacuumSensor AT %I*	: BOOL;
+	_BlowOff AT %Q*			: BOOL;
+	_hmiParameters			: ST_EjectorParameters;
+	_parameters				: ST_EjectorParameters;
+	
+	fbMessageChange			: FB_TcMessage;
+	fbMessageLoaded			: FB_TcMessage;
+	
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[]]></ST>
+    </Implementation>
+    <Folder Name="Parameters" Id="{d8236db4-e37f-4aaa-afb3-c2e28b415a1e}" />
+    <Method Name="Abort" Id="{9572b01f-15bc-4ea1-bd87-e7c073193092}">
+      <Declaration><![CDATA[METHOD Abort : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[BlowOff := FALSE;
+PickUpVacuum := FALSE;
+zSlide.Neutral();
+axis.Disable();
+EjectSamplePass(Execute := FALSE);
+EjectSampleFail(Execute := FALSE);
+Reset(Execute := FALSE);
+]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="BlowOff" Id="{bcdb309b-0c76-4954-a549-40664876bfa0}">
+      <Declaration><![CDATA[PROPERTY BlowOff : BOOL]]></Declaration>
+      <Get Name="Get" Id="{87ad0e65-5a7a-4c26-9b3e-3d446a1ac2a4}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[BlowOff := _BlowOff;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{0a1055a0-a4dc-4e83-8004-d273ac59a5c3}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[_BlowOff := BlowOff;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="EjectAxisFailPosition" Id="{9325a79d-050a-4ee3-95c1-d06afeab19f3}" FolderPath="Parameters\">
+      <Declaration><![CDATA[PROPERTY EjectAxisFailPosition : LREAL]]></Declaration>
+      <Get Name="Get" Id="{81a33da6-85d7-4202-aa27-6d8ec71587a3}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[EjectAxisFailPosition := _parameters.ejectPositionFail;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{e8b5a0d2-0cc9-4f43-84fd-beb5e04cc5ba}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[fbMessageChange.ipArguments.Clear().AddString('EjectAxisFailPosition').AddLReal(_parameters.ejectPositionFail).AddLReal(EjectAxisFailPosition);
+fbMessageChange.Send(0);
+_parameters.ejectPositionFail := EjectAxisFailPosition;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="EjectAxisHomePosition" Id="{acdc6ecc-3061-46f9-958d-fe9131ba2c08}" FolderPath="Parameters\">
+      <Declaration><![CDATA[PROPERTY EjectAxisHomePosition : LREAL]]></Declaration>
+      <Get Name="Get" Id="{71477ea1-c3e0-484c-b168-81b87fa9761b}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[EjectAxisHomePosition := _parameters.ejectPositionHome;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{683aab1c-e67b-4e32-a315-d2889294019e}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[fbMessageChange.ipArguments.Clear().AddString('EjectAxisHomePosition').AddLReal(_parameters.ejectPositionHome).AddLReal(EjectAxisHomePosition);
+fbMessageChange.Send(0);
+_parameters.ejectPositionHome := EjectAxisHomePosition;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="EjectAxisPassPosition" Id="{19ccb745-e931-4dd2-820b-fdf62cb1e7a9}" FolderPath="Parameters\">
+      <Declaration><![CDATA[PROPERTY EjectAxisPassPosition : LREAL]]></Declaration>
+      <Get Name="Get" Id="{6cdc2d72-59a7-446c-9aa0-9e71687d0340}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[EjectAxisPassPosition := _parameters.ejectPositionPass;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{e650fcbf-9c9f-4383-9578-faea53e1bbcc}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[fbMessageChange.ipArguments.Clear().AddString('EjectAxisPassPosition').AddLReal(_parameters.ejectPositionPass).AddLReal(EjectAxisPassPosition);
+fbMessageChange.Send(0);
+_parameters.ejectPositionPass := EjectAxisPassPosition;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="EjectAxisVelocity" Id="{85234462-7143-4ac0-a2b5-d5f36b8d07e1}" FolderPath="Parameters\">
+      <Declaration><![CDATA[PROPERTY EjectAxisVelocity : LREAL]]></Declaration>
+      <Get Name="Get" Id="{62b18701-363a-4825-9964-c7cd4b23af90}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[EjectAxisVelocity := _parameters.ejectVelocity;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{cb95cddd-8e13-410e-8c0b-f4440e6cbd4f}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[fbMessageChange.ipArguments.Clear().AddString('EjectAxisVelocity').AddLReal(_parameters.ejectVelocity).AddLReal(EjectAxisVelocity);
+fbMessageChange.Send(0);
+_parameters.ejectVelocity := EjectAxisVelocity;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Method Name="EjectSampleFail" Id="{3386b649-de86-4924-bd99-2e913152797d}">
+      <Declaration><![CDATA[METHOD EjectSampleFail : INT
+VAR_INPUT
+	Execute	: BOOL;
+END_VAR
+VAR_INST
+	rTrig	: R_TRIG;
+	nIndex	: INT;
+	TON		: TON;
+	Message	: STRING(255);
+END_VAR
+VAR
+	
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[EjectSampleFail := 0;
+rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	axis.AbsMove(Execute := FALSE, Position := 0, Velocity := 0);
+	nIndex := 10;
+END_IF
+
+IF NOT Execute THEN
+	nIndex := 0;
+END_IF
+
+CASE nIndex OF
+	10: // verify that we are retracted in x
+		Message := 'Moving to pick up location';
+		IF axis.AbsMove(Execute := TRUE, Position := _parameters.ejectPositionHome, Velocity := _parameters.ejectVelocity) THEN
+			axis.AbsMove(Execute := FALSE, Position := 0, Velocity := 0);
+			nIndex := 20;
+		END_IF
+		IF axis.Error THEN
+			Message := 'Error moving to pick up location';
+			axis.AbsMove(Execute := FALSE, Position := 0, Velocity := 0);
+			nIndex := 911;
+		END_IF
+	20: // extend z axis turn on pick up vacuum
+		Message := 'Extending z actuator';
+		_Vacuum := TRUE;
+		IF zSlide.Extend() = 1 THEN
+			nIndex := 30;	
+		ELSIF zSlide.Extend() = -1 THEN
+			Message := 'Error extending z actuator';
+			nIndex := 911;
+		END_IF
+	30: // wait a second
+		TON.IN := TRUE;
+		TON.PT := T#750MS;
+		IF TON.Q THEN
+			TON.IN := FALSE;
+			nIndex := 40;
+		END_IF
+		TON();
+	40: // retract z axis
+		Message := 'Retract z actuator';
+		IF zSlide.Retract() = 1 THEN
+			nIndex := 50;
+		ELSIF zSlide.Retract() = -1 THEN
+			Message := 'Error retracting z actuaor';
+			nIndex := 911;
+		END_IF
+	50: // extend the x axis; turn on the blowoff air
+		Message := 'Moving to eject reject position';
+		IF axis.AbsMove(Execute := TRUE, Position := _parameters.ejectPositionFail, Velocity := _parameters.ejectVelocity) THEN
+			axis.AbsMove(Execute := FALSE, Position := 0, Velocity := 0);
+			nIndex := 60;
+		END_IF
+		IF axis.Error THEN
+			Message := 'Error moving to reject position';
+			nIndex := 911;
+			axis.AbsMove(Execute := FALSE, Position := 0, Velocity := 0);
+		END_IF
+	60: // turn off the blow off	
+		_Vacuum := FALSE;	
+		IF zSlide.Extend() = 1 THEN
+			_BlowOff := TRUE;
+		END_IF
+		TON.IN := _BlowOff;
+		TON.PT := T#500MS;
+		IF TON.Q THEN
+			_BlowOff := FALSE;		
+			TON.IN := FALSE;
+			nIndex := 70;
+		END_IF
+		TON();
+	70: // retract the x axis
+		Message := 'Moving back to pick up position.';
+		zSlide.Retract();
+		IF axis.AbsMove(Execute := TRUE, Position := _parameters.ejectPositionHome, Velocity := _parameters.ejectVelocity) THEN
+			axis.AbsMove(Execute := FALSE, Position := 0, Velocity := 0);
+			nIndex := 80;
+		END_IF
+		IF axis.Error THEN
+			Message := 'Error moving back to pick up position';
+			axis.AbsMove(Execute := FALSE, Position := 0, Velocity := 0);
+			nIndex := 911;
+		END_IF
+	80: // done state
+		EjectSampleFail := 1;		
+END_CASE]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="EjectSamplePass" Id="{dd291527-01e2-412b-b66a-fae33418561f}">
+      <Declaration><![CDATA[METHOD EjectSamplePass : INT
+VAR_INPUT
+	Execute	: BOOL;
+END_VAR
+VAR_INST
+	rTrig	: R_TRIG;
+	nIndex	: INT;
+	TON		: TON;
+	Message	: STRING;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[EjectSamplePass := 0;
+rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	axis.AbsMove(Execute := FALSE, Position := 0, Velocity := 0);
+	nIndex := 10;
+END_IF
+
+IF NOT Execute THEN
+	nIndex := 0;
+END_IF
+
+CASE nIndex OF
+	10: // verify that we are retracted in x
+		Message := 'Moving to pick up location';
+		IF axis.AbsMove(Execute := TRUE, Position := _parameters.ejectPositionHome, Velocity := _parameters.ejectVelocity) THEN
+			axis.AbsMove(Execute := FALSE, Position := 0, Velocity := 0);
+			nIndex := 20;
+		END_IF
+		IF axis.Error THEN
+			Message := 'Error moving to pick up location';
+			axis.AbsMove(Execute := FALSE, Position := 0, Velocity := 0);
+			nIndex := 911;
+		END_IF
+	20: // extend z axis turn on pick up vacuum
+		Message := 'Extending z actuator';
+		_Vacuum := TRUE;
+		IF zSlide.Extend() = 1 THEN
+			nIndex := 30;
+		ELSIF zSlide.Extend() = -1 THEN
+			Message := 'Error extending z actuator';
+			nIndex := 911;
+		END_IF
+	30: // wait a second
+		TON.IN := TRUE;
+		TON.PT := T#750MS;
+		IF TON.Q THEN
+			TON.IN := FALSE;
+			nIndex := 40;
+		END_IF
+		TON();
+	40: // retract z axis
+		Message := 'Retract z actuator';
+		IF zSlide.Retract() = 1 THEN
+			nIndex := 50;
+		ELSIF zSlide.Retract() = -1 THEN
+			Message := 'Error retracting z actuaor';
+			nIndex := 911;
+		END_IF		
+	50: // extend the x axis; turn on the blowoff air
+		Message := 'Moving to eject pass position';
+		IF axis.AbsMove(Execute := TRUE, Position := _parameters.ejectPositionPass, Velocity := _parameters.ejectVelocity) THEN
+			axis.AbsMove(Execute := FALSE, Position := 0, Velocity := 0);
+			nIndex := 60;
+		END_IF
+		IF axis.Error THEN
+			Message := 'Error moving to pass position';
+			nIndex := 911;
+			axis.AbsMove(Execute := FALSE, Position := 0, Velocity := 0);
+		END_IF
+	60: // turn off the blow off		
+		_Vacuum := FALSE;
+		IF zSlide.Extend() = 1 THEN
+			_BlowOff := TRUE;	
+		END_IF
+		TON.IN := _BlowOff;
+		TON.PT := T#500MS;
+		IF TON.Q THEN
+			_BlowOff := FALSE;		
+			TON.IN := FALSE;
+			nIndex := 70;
+		END_IF
+		TON();
+	70: // retract the x axis
+		Message := 'Moving back to pick up position.';
+		zSlide.Retract();
+		IF axis.AbsMove(Execute := TRUE, Position := _parameters.ejectPositionHome, Velocity := _parameters.ejectVelocity) THEN
+			axis.AbsMove(Execute := FALSE, Position := 0, Velocity := 0);
+			nIndex := 80;
+		END_IF
+		IF axis.Error THEN
+			Message := 'Error moving back to pick up position';
+			axis.AbsMove(Execute := FALSE, Position := 0, Velocity := 0);
+			nIndex := 911;
+		END_IF
+	80: // done state
+		EjectSamplePass := 1;		
+END_CASE]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="FB_init" Id="{f32fceea-bc73-40fb-bc90-438e4ae6be85}">
+      <Declaration><![CDATA[METHOD FB_init : BOOL
+VAR_INPUT
+	bInitRetains : BOOL; // if TRUE, the retain variables are initialized (warm start / cold start)
+	bInCopyCode : BOOL;  // if TRUE, the instance afterwards gets moved into the copy code (online change)
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF NOT fbMessageChange.EqualsToEventEntryEx(stOther := TC_EVENTS.SlitterEvents.ParameterChange) THEN
+	fbMessageChange.CreateEx(TC_EVENTS.SlitterEvents.ParameterChange, 0);
+	fbMessageChange.ipArguments.Clear();
+END_IF
+
+IF NOT fbMessageLoaded.EqualsToEventEntryEx(stOther := TC_EVENTS.SlitterEvents.ParametersLoadedFromFile) THEN
+	fbMessageLoaded.CreateEx(TC_EVENTS.SlitterEvents.ParametersLoadedFromFile, 0);
+	fbMessageLoaded.ipArguments.Clear().AddString('Ejector');
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="IsEjectZExtend" Id="{1698bd36-a543-499d-b2c9-0725b93a2d39}">
+      <Declaration><![CDATA[PROPERTY IsEjectZExtend : BOOL]]></Declaration>
+      <Get Name="Get" Id="{463c336d-9028-4e0f-8ae6-4134f2f1d0e5}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[IsEjectZExtend := zSlide.IsExtended;]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="IsEjectZRetract" Id="{7f9eb240-b4ce-4bd4-9eb4-5bc165852090}">
+      <Declaration><![CDATA[PROPERTY IsEjectZRetract : BOOL]]></Declaration>
+      <Get Name="Get" Id="{d510e139-e5b2-499d-a913-c5e6609488fe}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[IsEjectZRetract := zSlide.IsRetracted;]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Method Name="MonitorParameters" Id="{aab7828f-0417-444b-8c6a-60892fc4f927}" FolderPath="Parameters\">
+      <Declaration><![CDATA[METHOD MonitorParameters : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF _hmiParameters.ejectPositionFail <> EjectAxisFailPosition THEN
+	EjectAxisFailPosition := _hmiParameters.ejectPositionFail;
+END_IF
+
+IF _hmiParameters.ejectPositionHome <> EjectAxisHomePosition THEN
+	EjectAxisHomePosition := _hmiParameters.ejectPositionHome;
+END_IF
+
+IF _hmiParameters.ejectPositionPass <> EjectAxisPassPosition THEN
+	EjectAxisPassPosition := _hmiParameters.ejectPositionPass;
+END_IF
+
+IF _hmiParameters.ejectVelocity <> EjectAxisVelocity THEN
+	EjectAxisVelocity := _hmiParameters.ejectVelocity;
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="Parameters" Id="{fc4dadc5-ad24-4a97-909f-63ba7230c355}" FolderPath="Parameters\">
+      <Declaration><![CDATA[PROPERTY Parameters : ST_EjectorParameters]]></Declaration>
+      <Get Name="Get" Id="{1eeaa37d-857a-42d6-b39d-098c89042a03}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[Parameters := _parameters;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{7a5569fd-c4f7-42a9-9263-174e89e2ddb1}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[fbMessageLoaded.Send(0);
+_parameters := Parameters;
+_hmiParameters := Parameters;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="PickUpVacuum" Id="{a87a7670-cb9b-4ab4-b830-59f50d3ce68a}">
+      <Declaration><![CDATA[PROPERTY PickUpVacuum : BOOL]]></Declaration>
+      <Get Name="Get" Id="{830d474f-9794-4994-a741-5c6b2e06c628}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[PickUpVacuum := _Vacuum;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{93930817-90b1-4d77-927b-82f2d2a6e082}">
+        <Declaration><![CDATA[
+VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[_Vacuum := PickUpVacuum;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Method Name="Reset" Id="{0548ac50-d050-4ffb-ad43-b2cab5872ecf}">
+      <Declaration><![CDATA[METHOD Reset : INT
+VAR_INPUT
+	Execute	: BOOL;
+END_VAR
+VAR_INST
+	rTrig	: R_TRIG;
+	nIndex	: INT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[Reset := 0;
+
+rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	nIndex := 5;
+	EjectSampleFail(Execute := FALSE);
+	EjectSamplePass(Execute := FALSE);
+	axis.AbsMove(Execute := FALSE, Position := 0, Velocity := 0);
+	axis.Reset(Execute := FALSE);
+END_IF
+
+IF NOT Execute THEN
+	nIndex := 0;
+END_IF
+
+CASE nIndex OF
+	5: 
+		BlowOff := FALSE;
+		PickUpVacuum := FALSE;
+		zSlide.Reset();
+		nIndex := 7;
+	7: // retract the z axis
+		IF zSlide.Retract() = 1 THEN
+			nIndex := 10;
+		ELSIF zSlide.Retract() = -1 THEN
+			nIndex := 911;
+		END_IF
+		
+	10: // disable the axis
+		IF axis.Disable() THEN
+			nIndex := 20;
+		END_IF
+	20: // check if there's an error
+		IF axis.Error THEN
+			nIndex := 30;
+		ELSE
+			nIndex := 40;
+		END_IF
+	30: // reset the drive
+		IF axis.Reset(Execute := TRUE) THEN
+			axis.Reset(Execute := FALSE);
+			nIndex := 20;
+		END_IF
+	40: // enable the drive
+		IF axis.Enable() THEN
+			nIndex := 50;
+		END_IF
+	50: // move to the home position
+		IF axis.AbsMove(Execute := TRUE, Position := _parameters.ejectPositionHome, Velocity := _parameters.ejectVelocity) THEN
+			axis.AbsMove(Execute := FALSE, Position := 0, Velocity := 0);
+			nIndex := 60;
+		END_IF
+		IF axis.Error THEN
+			axis.AbsMove(Execute := TRUE, Position := 0, Velocity := 0);
+			nIndex := 911;
+		END_IF
+	60: // done state
+		Reset := 1;		
+END_CASE
+
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="ReturnToIdle" Id="{b3aadc4f-bec2-4fa1-88df-a59fbe4935ce}">
+      <Declaration><![CDATA[METHOD ReturnToIdle : INT
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_BlowOff := FALSE;
+_Vacuum := FALSE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <LineIds Name="FB_Ejector">
+      <LineId Id="9" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ejector.Abort">
+      <LineId Id="5" Count="2" />
+      <LineId Id="12" Count="0" />
+      <LineId Id="16" Count="2" />
+      <LineId Id="8" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ejector.BlowOff.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ejector.BlowOff.Set">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ejector.EjectAxisFailPosition.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ejector.EjectAxisFailPosition.Set">
+      <LineId Id="2" Count="0" />
+      <LineId Id="5" Count="1" />
+    </LineIds>
+    <LineIds Name="FB_Ejector.EjectAxisHomePosition.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ejector.EjectAxisHomePosition.Set">
+      <LineId Id="5" Count="1" />
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ejector.EjectAxisPassPosition.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ejector.EjectAxisPassPosition.Set">
+      <LineId Id="5" Count="1" />
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ejector.EjectAxisVelocity.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ejector.EjectAxisVelocity.Set">
+      <LineId Id="5" Count="1" />
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ejector.EjectSampleFail">
+      <LineId Id="222" Count="0" />
+      <LineId Id="135" Count="1" />
+      <LineId Id="253" Count="0" />
+      <LineId Id="137" Count="7" />
+      <LineId Id="147" Count="0" />
+      <LineId Id="254" Count="0" />
+      <LineId Id="189" Count="0" />
+      <LineId Id="195" Count="0" />
+      <LineId Id="190" Count="2" />
+      <LineId Id="259" Count="0" />
+      <LineId Id="193" Count="0" />
+      <LineId Id="196" Count="0" />
+      <LineId Id="194" Count="0" />
+      <LineId Id="151" Count="0" />
+      <LineId Id="260" Count="0" />
+      <LineId Id="152" Count="2" />
+      <LineId Id="261" Count="3" />
+      <LineId Id="156" Count="8" />
+      <LineId Id="265" Count="0" />
+      <LineId Id="165" Count="1" />
+      <LineId Id="266" Count="3" />
+      <LineId Id="168" Count="0" />
+      <LineId Id="271" Count="0" />
+      <LineId Id="197" Count="0" />
+      <LineId Id="200" Count="0" />
+      <LineId Id="198" Count="1" />
+      <LineId Id="201" Count="0" />
+      <LineId Id="272" Count="0" />
+      <LineId Id="202" Count="0" />
+      <LineId Id="204" Count="0" />
+      <LineId Id="203" Count="0" />
+      <LineId Id="173" Count="0" />
+      <LineId Id="273" Count="0" />
+      <LineId Id="233" Count="0" />
+      <LineId Id="243" Count="1" />
+      <LineId Id="175" Count="8" />
+      <LineId Id="274" Count="0" />
+      <LineId Id="234" Count="0" />
+      <LineId Id="205" Count="1" />
+      <LineId Id="208" Count="0" />
+      <LineId Id="207" Count="0" />
+      <LineId Id="209" Count="0" />
+      <LineId Id="275" Count="0" />
+      <LineId Id="210" Count="0" />
+      <LineId Id="212" Count="0" />
+      <LineId Id="211" Count="0" />
+      <LineId Id="187" Count="1" />
+      <LineId Id="18" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ejector.EjectSamplePass">
+      <LineId Id="221" Count="0" />
+      <LineId Id="135" Count="1" />
+      <LineId Id="222" Count="0" />
+      <LineId Id="137" Count="7" />
+      <LineId Id="147" Count="0" />
+      <LineId Id="224" Count="0" />
+      <LineId Id="189" Count="0" />
+      <LineId Id="195" Count="0" />
+      <LineId Id="190" Count="2" />
+      <LineId Id="225" Count="0" />
+      <LineId Id="193" Count="0" />
+      <LineId Id="196" Count="0" />
+      <LineId Id="194" Count="0" />
+      <LineId Id="151" Count="0" />
+      <LineId Id="229" Count="0" />
+      <LineId Id="152" Count="3" />
+      <LineId Id="230" Count="0" />
+      <LineId Id="227" Count="1" />
+      <LineId Id="156" Count="8" />
+      <LineId Id="231" Count="0" />
+      <LineId Id="165" Count="1" />
+      <LineId Id="233" Count="0" />
+      <LineId Id="235" Count="0" />
+      <LineId Id="234" Count="0" />
+      <LineId Id="167" Count="1" />
+      <LineId Id="236" Count="0" />
+      <LineId Id="197" Count="0" />
+      <LineId Id="200" Count="0" />
+      <LineId Id="198" Count="1" />
+      <LineId Id="201" Count="0" />
+      <LineId Id="237" Count="0" />
+      <LineId Id="202" Count="0" />
+      <LineId Id="204" Count="0" />
+      <LineId Id="203" Count="0" />
+      <LineId Id="173" Count="1" />
+      <LineId Id="241" Count="0" />
+      <LineId Id="252" Count="1" />
+      <LineId Id="175" Count="8" />
+      <LineId Id="238" Count="0" />
+      <LineId Id="242" Count="0" />
+      <LineId Id="205" Count="1" />
+      <LineId Id="208" Count="0" />
+      <LineId Id="207" Count="0" />
+      <LineId Id="209" Count="0" />
+      <LineId Id="239" Count="0" />
+      <LineId Id="210" Count="0" />
+      <LineId Id="212" Count="0" />
+      <LineId Id="211" Count="0" />
+      <LineId Id="187" Count="1" />
+      <LineId Id="18" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ejector.FB_init">
+      <LineId Id="8" Count="7" />
+      <LineId Id="7" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ejector.IsEjectZExtend.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ejector.IsEjectZRetract.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ejector.MonitorParameters">
+      <LineId Id="5" Count="2" />
+      <LineId Id="9" Count="0" />
+      <LineId Id="8" Count="0" />
+      <LineId Id="10" Count="1" />
+      <LineId Id="13" Count="0" />
+      <LineId Id="12" Count="0" />
+      <LineId Id="14" Count="1" />
+      <LineId Id="17" Count="0" />
+      <LineId Id="16" Count="0" />
+      <LineId Id="18" Count="1" />
+    </LineIds>
+    <LineIds Name="FB_Ejector.Parameters.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ejector.Parameters.Set">
+      <LineId Id="5" Count="0" />
+      <LineId Id="2" Count="0" />
+      <LineId Id="8" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ejector.PickUpVacuum.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ejector.PickUpVacuum.Set">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ejector.Reset">
+      <LineId Id="11" Count="0" />
+      <LineId Id="28" Count="0" />
+      <LineId Id="27" Count="0" />
+      <LineId Id="29" Count="1" />
+      <LineId Id="87" Count="1" />
+      <LineId Id="32" Count="1" />
+      <LineId Id="31" Count="0" />
+      <LineId Id="68" Count="0" />
+      <LineId Id="67" Count="0" />
+      <LineId Id="69" Count="1" />
+      <LineId Id="24" Count="0" />
+      <LineId Id="23" Count="0" />
+      <LineId Id="63" Count="0" />
+      <LineId Id="71" Count="1" />
+      <LineId Id="84" Count="2" />
+      <LineId Id="64" Count="1" />
+      <LineId Id="82" Count="1" />
+      <LineId Id="66" Count="0" />
+      <LineId Id="81" Count="0" />
+      <LineId Id="25" Count="0" />
+      <LineId Id="34" Count="5" />
+      <LineId Id="41" Count="1" />
+      <LineId Id="40" Count="0" />
+      <LineId Id="43" Count="2" />
+      <LineId Id="47" Count="0" />
+      <LineId Id="46" Count="0" />
+      <LineId Id="48" Count="6" />
+      <LineId Id="56" Count="0" />
+      <LineId Id="55" Count="0" />
+      <LineId Id="57" Count="1" />
+      <LineId Id="60" Count="0" />
+      <LineId Id="59" Count="0" />
+      <LineId Id="61" Count="1" />
+      <LineId Id="26" Count="0" />
+      <LineId Id="12" Count="1" />
+    </LineIds>
+    <LineIds Name="FB_Ejector.ReturnToIdle">
+      <LineId Id="5" Count="0" />
+      <LineId Id="9" Count="1" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

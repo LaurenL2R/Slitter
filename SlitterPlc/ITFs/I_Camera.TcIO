@@ -1,0 +1,87 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.3">
+  <Itf Name="I_Camera" Id="{fd8b29c8-8511-48cf-ae61-5e8f00989e97}">
+    <Declaration><![CDATA[INTERFACE I_Camera
+]]></Declaration>
+    <Method Name="Calibrate" Id="{7b65231d-b1c1-4597-81c2-25be3d326eb5}">
+      <Declaration><![CDATA[METHOD Calibrate : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+    </Method>
+    <Property Name="CalibrationDistance" Id="{bdcc2281-9116-49d1-992d-0dead0c6a31c}">
+      <Declaration><![CDATA[PROPERTY CalibrationDistance : LREAL]]></Declaration>
+      <Get Name="Get" Id="{b3c1743c-632c-4cbc-a0cb-2d69faff237b}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+      <Set Name="Set" Id="{6dc01022-43e1-4873-8c99-6a72a41e5a38}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Set>
+    </Property>
+    <Property Name="CameraProgram" Id="{b289c2d1-81a5-4b2d-b6ed-4ff15b81de73}">
+      <Declaration><![CDATA[PROPERTY CameraProgram : STRING]]></Declaration>
+      <Get Name="Get" Id="{27983be2-754e-4425-9d32-30bcdbe61946}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+      <Set Name="Set" Id="{bf439bde-9a51-43ea-b6bb-ea48957cdb06}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Set>
+    </Property>
+    <Method Name="Compute" Id="{40f53600-09cc-450e-aef5-8283a6c4b1fb}">
+      <Declaration><![CDATA[METHOD Compute : INT
+VAR_INPUT
+	Execute		: BOOL;	
+END_VAR
+]]></Declaration>
+    </Method>
+    <Property Name="CutLengthWithOffset" Id="{36e00f48-6949-4ed3-a7e4-a82b9d7e5de1}">
+      <Declaration><![CDATA[PROPERTY CutLengthWithOffset : REAL]]></Declaration>
+      <Get Name="Get" Id="{d003ff3c-7d66-4861-8477-18f09b7357a7}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+      <Set Name="Set" Id="{b684dcf3-4d6f-4224-bee7-6d537ec5facf}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Set>
+    </Property>
+    <Property Name="DeltaXmmWithOffset" Id="{8e6eeeda-ff9c-4a81-9001-f77d7761561b}">
+      <Declaration><![CDATA[PROPERTY DeltaXmmWithOffset : REAL]]></Declaration>
+      <Get Name="Get" Id="{d08d051b-4a88-48fb-b036-c292455db2fd}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+      <Set Name="Set" Id="{26d24dd8-558a-4356-b748-a4265c98c0f7}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Set>
+    </Property>
+    <Property Name="DeltaYmmWithOffset" Id="{c8df6d88-9952-41cf-a7e7-3e34448f7c79}">
+      <Declaration><![CDATA[PROPERTY DeltaYmmWithOffset : REAL]]></Declaration>
+      <Get Name="Get" Id="{78866c62-5953-4528-98fe-971c5ae318cd}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+      <Set Name="Set" Id="{131e6056-1f53-4f1e-b344-0079cf2570ec}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Set>
+    </Property>
+    <Property Name="Fail" Id="{8d6376a3-1d10-47d6-97f4-08bbb651f54f}">
+      <Declaration><![CDATA[PROPERTY Fail : BOOL]]></Declaration>
+      <Get Name="Get" Id="{2cd39be8-9cea-4378-a040-ba87693aa753}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+      <Set Name="Set" Id="{693d7187-3296-44d8-a09d-4769556dcbb3}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Set>
+    </Property>
+    <Method Name="GetCameraData" Id="{0228e972-e4c0-4133-993e-1309b0724057}">
+      <Declaration><![CDATA[METHOD GetCameraData : INT
+VAR_INPUT
+END_VAR
+]]></Declaration>
+    </Method>
+    <Method Name="Inspect" Id="{48a92c12-044f-4a9e-a671-674479004d74}">
+      <Declaration><![CDATA[METHOD Inspect : INT
+VAR_INPUT
+	Execute	: BOOL;
+END_VAR
+]]></Declaration>
+    </Method>
+  </Itf>
+</TcPlcObject>

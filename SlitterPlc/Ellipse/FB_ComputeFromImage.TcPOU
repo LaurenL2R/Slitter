@@ -1,0 +1,86 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.3">
+  <POU Name="FB_ComputeFromImage" Id="{7c26fa06-d730-44cb-a3a7-f7dc14edb998}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_ComputeFromImage
+VAR_INPUT
+	ptrXValues	: POINTER TO ARRAY[1..GVL.NumberVisionPoints] OF REAL;
+	ptrYValues	: POINTER TO ARRAY[1..GVL.NumberVisionPoints] OF REAL;
+	minor		: LREAL;	// in mm
+	pitch		: LREAL;	// mm per pixel
+END_VAR
+VAR_OUTPUT
+	centerX		: LREAL;
+	centerY		: LREAL;
+	a			: LREAL;	// major in mm
+	b			: LREAL;	// minor in mm
+END_VAR
+	
+VAR
+	fbSecond	: FB_SecondOrder;
+	fbFourth	: FB_FourthOrder;
+	fbEllipse	: FB_Ellipse;
+	xPeak		: LREAL;
+	yPeak		: LREAL;
+	XMirror		: ARRAY[1..GVL.NumberEllipsePoints] OF LREAL;
+	YMirror		: ARRAY[1..GVL.NumberEllipsePoints] OF LREAL;
+	CenterLine	: LREAL;
+	i			: INT;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[fbSecond.FindPeak(xValues := ptrXValues, yValues := ptrYValues, xPeak := ADR(xPeak));
+fbFourth.FindYatX(xValues := ptrXValues, yValues := ptrYValues, xPeak := ADR(xPeak), yPeak := ADR(yPeak));
+centerLine := yPeak - (minor / pitch);
+
+FOR i := 1 TO GVL.NumberVisionPoints DO
+	XMirror[i] := REAL_TO_LREAL(ptrXValues^[i]);	
+	XMirror[i + GVL.NumberVisionPoints] := REAL_TO_LREAL(ptrXValues^[i]);
+	YMirror[i] := REAL_TO_LREAL(ptrYValues^[i]);
+	YMirror[i + GVL.NumberVisionPoints] := REAL_TO_LREAL(ptrYValues^[i] - ABS(2*(ptrYValues^[i] - centerLine)));
+END_FOR
+
+fbEllipse.EllipseFit(xValues := xMirror, yValues := yMirror);
+centerX := fbEllipse.centrex;
+centerY := fbEllipse.centrey;
+a := fbEllipse.major * pitch;
+b := fbEllipse.minor * pitch;
+
+
+
+
+
+
+
+
+
+	
+]]></ST>
+    </Implementation>
+    <LineIds Name="FB_ComputeFromImage">
+      <LineId Id="15" Count="0" />
+      <LineId Id="19" Count="0" />
+      <LineId Id="26" Count="0" />
+      <LineId Id="31" Count="0" />
+      <LineId Id="30" Count="0" />
+      <LineId Id="36" Count="0" />
+      <LineId Id="32" Count="0" />
+      <LineId Id="38" Count="0" />
+      <LineId Id="35" Count="0" />
+      <LineId Id="33" Count="0" />
+      <LineId Id="48" Count="0" />
+      <LineId Id="47" Count="0" />
+      <LineId Id="56" Count="3" />
+      <LineId Id="50" Count="0" />
+      <LineId Id="49" Count="0" />
+      <LineId Id="45" Count="0" />
+      <LineId Id="44" Count="0" />
+      <LineId Id="40" Count="0" />
+      <LineId Id="39" Count="0" />
+      <LineId Id="28" Count="0" />
+      <LineId Id="27" Count="0" />
+      <LineId Id="22" Count="0" />
+      <LineId Id="20" Count="0" />
+      <LineId Id="17" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

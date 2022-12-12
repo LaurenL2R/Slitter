@@ -1,0 +1,33 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.9">
+  <DUT Name="ST_TubeParameters" Id="{7907e83f-9dab-448b-b21d-47cd7220e710}">
+    <Declaration><![CDATA[TYPE ST_TubeParameters :
+STRUCT
+	Index				: INT;
+	Description			: STRING;
+	ProductName			: STRING;
+	Diameter			: LREAL;	// diameter [mm] of tube at top protrusion
+	DepthOfPocket		: LREAL;	// cut surface offset from top most surface [mm]
+	MinLength			: LREAL;	// criteria: minimum length of an allowable cut length [mm]
+	MaxLength			: LREAL;	// criteria: maximum length of an allowable cut length [mm]
+	MinHeight			: LREAL;	// criteria: minimum width of blob of cut [mm]
+	MaxHeight			: LREAL;	// criteria: maximum width of blob of cut [mm]
+	ResultToleranceX	: LREAL;	// criteria: allowable difference from center of tube to center of cut x axis
+	ResultToleranceY	: LREAL;	// criteria: allowable difference from center of tube to center of cut y axis
+	AdjustmentX			: LREAL;  	// adjustment to add to result in mm before determining pass/fail
+	AdjustmentY			: LREAL;	// adjustment to add to result in mm before determining pass/fail
+	AdjustmentLength	: LREAL;	// adjustment to add to length result in mm before determining pass/fail	
+	CutPositionX		: LREAL;	
+	CutPositionY		: LREAL;
+	InspectPositionX 	: LREAL;
+	InspectPositionY 	: LREAL;
+	EjectPositionX		: LREAL;
+	EjectPositionY		: LREAL;
+	VacPosition			: LREAL;	// vacuum axis position
+	VacuumThreshold		: REAL; 	// mmHg to detect presence of tube on mandrel	
+	ComputerProgram		: STRING := 'Tube';
+END_STRUCT
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

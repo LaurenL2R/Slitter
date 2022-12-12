@@ -1,0 +1,247 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.9">
+  <POU Name="FB_Axis" Id="{bc000919-1c04-4722-abe2-41d5cc74783b}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Axis
+VAR_INPUT
+END_VAR
+VAR_OUTPUT
+END_VAR
+VAR
+	axis	: AXIS_REF;
+	mcPower	: MC_Power;
+	mcMove	: MC_MoveAbsolute;
+	mcReset	: MC_Reset;
+	fbAlarm	: FB_TcAlarm;
+	
+	_error	: BOOL;
+	_errorId	: UDINT;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[]]></ST>
+    </Implementation>
+    <Method Name="AbsMove" Id="{c2f4b0ca-b88e-4fc8-9492-63069fb84dce}">
+      <Declaration><![CDATA[METHOD AbsMove : BOOL
+VAR_INPUT
+	Execute	: BOOL;
+	Position	: LREAL;
+	Velocity	: LREAL;
+END_VAR
+VAR_INST
+	nState	: INT;
+	rTrig	: R_TRIG;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[AbsMove := FALSE;
+
+rTrig(Clk := Execute);
+IF rTrig.Q THEN
+	nState := 10;
+	mcMove(Axis := Axis, Execute := FALSE);
+END_IF
+
+IF NOT Execute THEN
+	nState := 0;
+END_IF
+
+CASE nState OF
+	10: // move
+		mcMove.Position := Position;
+		mcMove.Velocity := Velocity;
+		mcMove.Execute := TRUE;
+		IF McMove.Done THEN
+			nState := 20;
+			mcMove.Execute := FALSE;
+		END_IF
+		IF mcMove.Error THEN
+			_error := TRUE;
+			_errorId := mcMove.ErrorID;
+			fbAlarm.ipArguments.Clear().AddUDInt(_errorId);
+			fbAlarm.Raise(0);
+			mcMove.Execute := FALSE;
+			nState := 20;
+		END_IF
+		mcMove(Axis := Axis);
+	20: // done state
+		AbsMove := TRUE;
+END_CASE]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="Disable" Id="{eeabe391-6cd3-4d46-a266-e62f3d58dd8b}">
+      <Declaration><![CDATA[METHOD Disable : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[Axis.ReadStatus();
+Disable := NOT mcPower.Status;
+mcPower(Axis := Axis, Enable := FALSE);]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="Enable" Id="{32dab039-f63c-4cef-a370-2213ac51175c}">
+      <Declaration><![CDATA[METHOD Enable : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[axis.ReadStatus();
+Enable := mcPower.Status AND axis.Status.Operational;
+mcPower(axis := axis, enable := TRUE, Enable_Positive := TRUE, Enable_Negative := TRUE);
+]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="Error" Id="{7e1079a6-5dbd-4dad-86f5-5f117f277c72}">
+      <Declaration><![CDATA[PROPERTY Error : BOOL]]></Declaration>
+      <Get Name="Get" Id="{a5dc245c-87aa-4c5f-940d-b1bdc5cc5441}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[Error := Axis.NcToPlc.ErrorCode <> 0 OR _error;]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Method Name="FB_init" Id="{23fc91f8-4e71-4631-ad5d-1b88e434a24a}">
+      <Declaration><![CDATA[METHOD FB_init : BOOL
+VAR_INPUT
+	bInitRetains : BOOL; // if TRUE, the retain variables are initialized (warm start / cold start)
+	bInCopyCode : BOOL;  // if TRUE, the instance afterwards gets moved into the copy code (online change)
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF fbAlarm.EqualsToEventEntryEx(stOther := TC_EVENTS.SlitterEvents.EjectorAxisError) THEN
+	fbAlarm.CreateEx(TC_EVENTS.SlitterEvents.EjectorAxisError, FALSE, 0);
+	fbAlarm.ipArguments.Clear();
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="IsEnabled" Id="{60a7f699-9173-473c-a2cb-1674d9ee927f}">
+      <Declaration><![CDATA[PROPERTY IsEnabled : BOOL]]></Declaration>
+      <Get Name="Get" Id="{d4c7f1fe-6918-46c6-96a1-06914821be66}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[Axis.ReadStatus();
+IsEnabled := mcPower.Status AND Axis.Status.Operational;]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Method Name="Reset" Id="{a90c0f7c-f40b-41f5-b12f-9195c5c5b06f}">
+      <Declaration><![CDATA[METHOD Reset : BOOL
+VAR_INPUT
+	Execute : BOOL;
+END_VAR
+VAR_INST
+	nState	: INT;
+	rTrig	: R_TRIG;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[Reset := FALSE;
+rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	mcMove(Axis := Axis, Execute := FALSE);
+	mcReset(Axis := Axis, Execute := FALSE);
+	_error := FALSE;
+	_errorId := 0;
+	nState := 10;
+END_IF
+IF NOT Execute THEN
+	nState := 0;
+END_IF
+CASE nState OF
+	10: // reset the system
+		IF fbAlarm.bRaised THEN
+			fbAlarm.Clear(0, FALSE);
+		END_IF
+		mcReset.Execute := TRUE;
+		IF mcReset.Done THEN
+			mcReset.Execute := FALSE;
+			nState := 20;
+		END_IF
+		IF mcReset.Error THEN
+			_error := TRUE;
+			_errorId := mcReset.ErrorID;
+			fbAlarm.ipArguments.Clear().AddUDInt(_errorId);
+			fbAlarm.Raise(0);
+			nState := 20;
+		END_IF
+		mcReset(Axis := Axis);
+	20: // done state
+		Reset := TRUE;
+END_CASE
+]]></ST>
+      </Implementation>
+    </Method>
+    <LineIds Name="FB_Axis">
+      <LineId Id="9" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Axis.AbsMove">
+      <LineId Id="48" Count="1" />
+      <LineId Id="5" Count="0" />
+      <LineId Id="11" Count="1" />
+      <LineId Id="14" Count="0" />
+      <LineId Id="13" Count="0" />
+      <LineId Id="32" Count="0" />
+      <LineId Id="29" Count="2" />
+      <LineId Id="26" Count="0" />
+      <LineId Id="25" Count="0" />
+      <LineId Id="27" Count="0" />
+      <LineId Id="33" Count="4" />
+      <LineId Id="39" Count="0" />
+      <LineId Id="38" Count="0" />
+      <LineId Id="40" Count="1" />
+      <LineId Id="50" Count="0" />
+      <LineId Id="61" Count="1" />
+      <LineId Id="43" Count="1" />
+      <LineId Id="42" Count="0" />
+      <LineId Id="45" Count="2" />
+      <LineId Id="28" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Axis.Disable">
+      <LineId Id="5" Count="2" />
+    </LineIds>
+    <LineIds Name="FB_Axis.Enable">
+      <LineId Id="6" Count="0" />
+      <LineId Id="5" Count="0" />
+      <LineId Id="7" Count="1" />
+    </LineIds>
+    <LineIds Name="FB_Axis.Error.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Axis.FB_init">
+      <LineId Id="7" Count="1" />
+      <LineId Id="10" Count="0" />
+      <LineId Id="9" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Axis.IsEnabled.Get">
+      <LineId Id="5" Count="0" />
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Axis.Reset">
+      <LineId Id="33" Count="0" />
+      <LineId Id="13" Count="1" />
+      <LineId Id="5" Count="1" />
+      <LineId Id="39" Count="1" />
+      <LineId Id="15" Count="1" />
+      <LineId Id="18" Count="0" />
+      <LineId Id="36" Count="1" />
+      <LineId Id="17" Count="0" />
+      <LineId Id="19" Count="0" />
+      <LineId Id="49" Count="2" />
+      <LineId Id="21" Count="2" />
+      <LineId Id="25" Count="0" />
+      <LineId Id="24" Count="0" />
+      <LineId Id="26" Count="1" />
+      <LineId Id="35" Count="0" />
+      <LineId Id="52" Count="1" />
+      <LineId Id="29" Count="0" />
+      <LineId Id="28" Count="0" />
+      <LineId Id="30" Count="2" />
+      <LineId Id="20" Count="0" />
+      <LineId Id="7" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

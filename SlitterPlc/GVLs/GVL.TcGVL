@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.3">
+  <GVL Name="GVL" Id="{e6801d19-7533-480e-99a7-2ea5f33b4286}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+VAR_GLOBAL CONSTANT
+	NumberVisionPoints	: INT := 20;	// number of points from the camera vision system
+	NumberEllipsePoints	: INT := 40; 	// number of ellipse points is 2x number of vision points
+	Unknowns			: INT := 5;		// ellipse coefficients
+	MaxIterations		: INT := 50;	
+	ConvergenceCriteria : LREAL := 0.000000001;	
+	CameraIpAddress		: STRING := '192.168.1.2';
+	ModbusReadOffset	: WORD := 7000;
+	ModbusWriteOffset	: WORD := 2000;
+END_VAR]]></Declaration>
+  </GVL>
+</TcPlcObject>

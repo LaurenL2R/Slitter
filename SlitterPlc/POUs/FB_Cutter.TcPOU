@@ -1,0 +1,784 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.9">
+  <POU Name="FB_Cutter" Id="{ebc15f59-eaa6-41ba-9605-4921cad05028}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Cutter 
+VAR_INPUT
+END_VAR
+VAR_OUTPUT
+END_VAR
+VAR
+	Axis			: AXIS_REF;	// SMAC Actuator
+	mcMoveVel		: MC_MoveVelocity;
+	mcMoveAbs		: MC_MoveAbsolute;
+	mcHome			: MC_Home;
+	mcHalt			: MC_Halt;
+	mcPower			: MC_Power;
+	mcReset			: MC_Reset;
+	_errorCode		: UDINT;
+	_position		: LREAL;
+	_velocity		: LREAL := 20;
+	_hmiParameters	: ST_CutterParameters;
+	_parameters		: ST_CutterParameters;
+	
+	fbMessageChange			: FB_TcMessage;
+	fbMessageLoaded			: FB_TcMessage;
+	
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[]]></ST>
+    </Implementation>
+    <Folder Name="Parameters" Id="{ce4a7b75-2685-4cf5-8fb0-420c373c1f95}" />
+    <Method Name="Abort" Id="{69707677-0ca7-4ee4-b97c-64014dcb739a}">
+      <Declaration><![CDATA[METHOD Abort : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[mcPower(Axis := Axis, Enable := FALSE);
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="Clear" Id="{011010a7-a98a-41a1-8ac6-357903db8884}">
+      <Declaration><![CDATA[METHOD Clear : INT
+VAR_INPUT
+	Execute : BOOL;
+END_VAR
+VAR_INST
+	rTrig	: R_TRIG;
+	nIndex	: INT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	nIndex := 10;
+	Reset(Execute := FALSE);
+	Home(Execute := FALSE);
+	MoveAbs(Execute := FALSE);
+END_IF
+
+IF NOT Execute THEN
+	nIndex := 0;
+END_IF
+
+CASE nIndex OF
+	0: // idle state
+		Clear := 0;
+	10: // reset the cutter
+		IF Reset(Execute := TRUE) = 1 THEN
+			Reset(Execute := FALSE);
+			nIndex := 20;
+		END_IF
+	20: // enable the cutter
+		IF Enable() THEN
+			nIndex := 30;
+		END_IF
+	30: // home the cutter
+		IF Home(Execute := TRUE) = 1 THEN
+			Home(Execute := FALSE);
+			nIndex := 40;
+		END_IF
+	40: // move to position 5 mm
+		_position := 5;
+		IF MoveAbs(Execute := TRUE) = 1 THEN
+			MoveAbs(Execute := FALSE);
+			nIndex := 50;
+		END_IF
+	50: // done state
+		Clear := 1;
+END_CASE]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="CutSample" Id="{1f88fb02-f387-4885-a3bd-e45a00508049}">
+      <Declaration><![CDATA[METHOD CutSample : INT
+VAR_INPUT
+	Execute	: BOOL;
+END_VAR
+VAR_INST
+	rTrig	: R_TRIG;
+	nIndex	: INT;
+	MoveVelError : BOOL;
+	HaltError : BOOL;
+	MoveAbsError : BOOL;
+	ErrorTimeout	: TON := (PT := T#5s);
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	nIndex := 10;
+	mcMoveVel(Execute := FALSE, Axis := Axis, BufferMode := MC_BufferMode.MC_Aborting,
+		Direction := MC_Direction.MC_Positive_Direction);
+	mcMoveAbs(Execute := FALSE, Axis := Axis);
+	mcHalt(Execute := FALSE, Axis := Axis);
+	mcReset(Execute := FALSE, Axis := Axis);
+	ErrorTimeout(IN := FALSE);
+	MoveVelError := FALSE;
+	HaltError := FALSE;
+	MoveAbsError := FALSE;
+END_IF
+
+IF NOT Execute THEN
+	nIndex := 0;
+END_IF
+
+CASE nIndex OF
+	0: // idle state
+		CutSample := 0;
+	10: // make sure its operational
+		Axis.ReadStatus();
+		IF Axis.Status.Operational THEN
+			nIndex := 20;
+		END_IF
+	20: // make the cut
+		mcMoveVel.Execute := TRUE;
+		ErrorTimeout.IN := TRUE;
+		mcMoveVel.Velocity := _parameters.cutVelocity;
+		IF Axis.NcToPlc.ActTorque > 400 THEN
+			nIndex := 30;
+			mcMoveVel.Execute := FALSE;
+			ErrorTimeout.IN := FALSE;
+			mcHalt(Axis := Axis, Execute := TRUE);
+		END_IF
+		IF mcMoveVel.Error THEN
+			_errorCode := mcMoveVel.ErrorID;
+			ErrorTimeout.IN := FALSE;
+			MoveVelError := TRUE;
+			nIndex := 70;
+		END_IF
+		IF ErrorTimeout.Q THEN
+			ErrorTimeout.IN := FALSE;
+			nIndex := 30;
+		END_IF
+		ErrorTimeout();
+		mcMoveVel(Axis := Axis);
+	30: // wait to halt
+		mcHalt.Execute := TRUE;
+		IF mcHalt.Done THEN
+			mcHalt.Execute := FALSE;
+			nIndex := 40;
+		END_IF
+		IF mcHalt.Error THEN
+			mcHalt.Execute := FALSE;
+			HaltError := TRUE;
+			_errorCode := mcHalt.ErrorID;
+			nIndex := 70;
+		END_IF
+		mcHalt(Axis := Axis);
+	40: // retract the cutter axis
+		mcMoveAbs.Execute := TRUE;
+		mcMoveAbs.Position := _parameters.retractPosition;
+		mcMoveAbs.Velocity := _parameters.cutVelocity;
+		IF mcMoveAbs.Done THEN
+			mcMoveAbs.Execute := FALSE;
+			nIndex := 50;
+		END_IF
+		IF mcMoveAbs.Error THEN
+			mcMoveAbs.Execute := FALSE;
+			MoveAbsError := TRUE;
+			_errorCode := mcMoveAbs.ErrorID;
+			nIndex := 70;
+		END_IF
+		mcMoveAbs(Axis := Axis);
+	45: // reset the lag
+		mcReset.Execute := TRUE;
+		IF mcReset.Done THEN
+			mcReset.Execute := FALSE;
+			nIndex := 50;
+		END_IF
+		mcReset(Axis := Axis);
+	50: // done state
+		CutSample := 1;
+	70: // error state
+		CutSample := -1;
+END_CASE
+
+]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="cutVelocity" Id="{b9636eec-8931-403c-a32b-85b1b9ff8d7a}" FolderPath="Parameters\">
+      <Declaration><![CDATA[PROPERTY cutVelocity : LREAL]]></Declaration>
+      <Get Name="Get" Id="{24a6e616-b932-4add-9e50-a0baebdf149b}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[cutVelocity := _parameters.cutVelocity;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{97b2e7ed-b381-432d-8882-95a473fc05d1}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[fbMessageChange.ipArguments.Clear().AddString('cutVelocity').AddLReal(_parameters.cutVelocity).AddLReal(CutVelocity);
+fbMessageChange.Send(0);
+_parameters.cutVelocity := cutVelocity;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Method Name="Disable" Id="{33146e5c-d840-431b-93c5-27167e6646f0}">
+      <Declaration><![CDATA[METHOD Disable : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[mcPower(Axis := Axis, Enable := FALSE, Enable_Positive := FALSE, Enable_Negative := FALSE);
+Axis.ReadStatus();
+Disable := NOT Axis.Status.Operational;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="Enable" Id="{4ae736dc-f027-40d6-a167-25b4e2114b26}">
+      <Declaration><![CDATA[METHOD Enable : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[mcPower(Axis := Axis, Enable := TRUE, Enable_Positive := TRUE, Enable_Negative := TRUE);
+Axis.ReadStatus();
+Enable := Axis.Status.Operational;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="FB_init" Id="{18c2fddc-59b7-4cee-8c8f-34e1e401e762}">
+      <Declaration><![CDATA[METHOD FB_init : BOOL
+VAR_INPUT
+	bInitRetains : BOOL; // if TRUE, the retain variables are initialized (warm start / cold start)
+	bInCopyCode : BOOL;  // if TRUE, the instance afterwards gets moved into the copy code (online change)
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF NOT fbMessageChange.EqualsToEventEntryEx(stOther := TC_EVENTS.SlitterEvents.ParameterChange) THEN
+	fbMessageChange.CreateEx(TC_EVENTS.SlitterEvents.ParameterChange, 0);
+	fbMessageChange.ipArguments.Clear();
+END_IF
+
+IF NOT fbMessageLoaded.EqualsToEventEntryEx(stOther := TC_EVENTS.SlitterEvents.ParametersLoadedFromFile) THEN
+	fbMessageLoaded.CreateEx(TC_EVENTS.SlitterEvents.ParametersLoadedFromFile, 0);
+	fbMessageLoaded.ipArguments.Clear().AddString('Cutter');
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="Home" Id="{453b3ca6-1e09-475b-b899-5440c09409c9}">
+      <Declaration><![CDATA[METHOD Home : INT
+VAR_INPUT
+	Execute	: BOOL;
+END_VAR
+VAR_INST
+	rTrig	: R_TRIG;
+	nIndex	: INT;
+	PosDif	: LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	nIndex := 10;
+	mcMoveVel(Axis := Axis, Execute := FALSE, Direction := MC_Direction.MC_Negative_Direction);
+	mcHalt(Axis := Axis, Execute := FALSE);
+	mcHome(Axis := Axis, Execute := FALSE);
+END_IF
+
+IF NOT Execute THEN
+	nIndex := 0;
+END_IF
+
+CASE nIndex OF
+	0: // idle state
+		Home := 0;
+	10: // move up (negative direction) slowly, watch the pos dif
+		mcMoveVel.Execute := TRUE;
+		IF mcMoveVel.InVelocity THEN
+			mcMoveVel.Execute := FALSE;
+			nIndex := 15;
+		END_IF
+		IF mcMoveVel.Error THEN
+			mcMoveVel.Execute := FALSE;
+			_errorCode := mcMoveVel.ErrorID;
+			nIndex := 50;
+		END_IF
+	15: // 
+		IF Axis.NcToPlc.PosDiff < -1 THEN
+			PosDif := Axis.NcToPlc.PosDiff;
+			mcHalt.Execute := TRUE;
+			nIndex := 20;
+		END_IF
+		IF mcMoveVel.Error THEN
+			mcMoveVel.Execute := FALSE;
+			_errorCode := mcMoveVel.ErrorID;
+			nIndex := 50;
+		END_IF
+	20: // wait for halt to finish
+		IF mcHalt.Done THEN
+			mcHalt.Execute := FALSE;
+			nIndex := 30;
+		END_IF
+		IF mcHalt.Error THEN
+			mcHalt.Execute := FALSE;
+			_errorCode := mcHalt.ErrorID;
+			nIndex := 50;
+		END_IF
+	30: // set this position as -1
+		mcHome.Execute := TRUE;
+		mcHome.HomingMode := MC_Direct;
+		mcHome.Position := -1;
+		IF mcHome.Done THEN
+			mcHome.Execute := FALSE;
+			nIndex := 40;
+		END_IF
+		IF mcHome.Error THEN
+			mcHome.Execute := FALSE;
+			_errorCode := mcHome.ErrorID;
+			nIndex := 50;
+		END_IF
+	40: // done
+		Home := 1;
+	50: // error state 
+		Home := -1;		
+
+END_CASE
+
+mcMoveVel(
+	Axis := Axis, 
+	Velocity := 5, 
+	Direction := MC_Direction.MC_Negative_Direction);
+mcHalt(Axis := Axis);
+mcHome(Axis := Axis);]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="IsEnabled" Id="{8771bb26-306c-4a28-8ef2-e83fdf107069}">
+      <Declaration><![CDATA[PROPERTY IsEnabled : BOOL]]></Declaration>
+      <Get Name="Get" Id="{c524ade2-cd0d-4edd-8e25-d0ff8dfab78a}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[Axis.ReadStatus();
+IsEnabled := Axis.Status.Operational;]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Method Name="MonitorParameters" Id="{930d9bd2-387f-4dbf-9be1-ec530bd9cfd8}" FolderPath="Parameters\">
+      <Declaration><![CDATA[METHOD MonitorParameters : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF _hmiParameters.cutVelocity <> cutVelocity THEN
+	cutVelocity := _hmiParameters.cutVelocity;
+END_IF
+
+IF _hmiParameters.retractPosition <> retractPosition THEN
+	retractPosition := _hmiParameters.retractPosition;
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="MoveAbs" Id="{3e1595c9-5095-481c-ba7b-d54cd038395b}">
+      <Declaration><![CDATA[METHOD MoveAbs : INT
+VAR_INPUT
+	Execute	: BOOL;
+END_VAR
+VAR_INST
+	nIndex 	: INT;
+	rTrig	: R_TRIG;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	nIndex := 10;
+	mcMoveAbs(Axis := Axis, Execute := FALSE);
+END_IF
+
+IF NOT Execute THEN
+	nIndex := 0;
+END_IF
+
+CASE nIndex OF
+	0: // idle state
+		MoveAbs := 0;
+	10: // move
+		mcMoveAbs.Execute := TRUE;
+		mcMoveAbs.Position := _position;
+		mcMoveAbs.Velocity := _velocity;
+		IF mcMoveAbs.Done THEN
+			nIndex := 20;
+			mcMoveAbs.Execute := FALSE;
+		END_IF
+		IF mcMoveAbs.Error THEN
+			nIndex := 30;
+			_errorCode := mcMoveAbs.ErrorID;
+			mcMoveAbs.Execute := FALSE;
+		END_IF
+		mcMoveAbs(Axis := Axis);
+	20: // done state
+		MoveAbs := 1;
+	30: // error state
+		MoveAbs := -1;
+END_CASE]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="Parameters" Id="{8bd93e5a-f04e-4908-8b4e-aeeefa8c15a4}" FolderPath="Parameters\">
+      <Declaration><![CDATA[PROPERTY Parameters : ST_CutterParameters]]></Declaration>
+      <Get Name="Get" Id="{1f7ff762-795d-4c8d-aa8a-62f1a1ef6742}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[Parameters := _parameters;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{41eb76ec-ac19-4c46-848b-352407c3a54a}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[fbMessageLoaded.Send(0);
+_parameters := Parameters;
+_hmiParameters := Parameters;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Method Name="Reset" Id="{b273be90-a8be-46bf-ad6f-562ac2d33d02}">
+      <Declaration><![CDATA[METHOD Reset : INT
+VAR_INPUT
+	Execute	: BOOL;
+END_VAR
+VAR_INST
+	nIndex 	: INT;
+	rTrig	: R_TRIG;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	nIndex := 10;
+	mcReset(Axis := Axis, Execute := FALSE);
+	Home(Execute := FALSE);
+	mcMoveAbs(Axis := Axis, Execute := FALSE);
+	mcHome(Axis := Axis, Execute := FALSE);
+	mcMoveVel(Axis := Axis, Execute := FALSE);
+	mcHalt(Axis := Axis, Execute := FALSE);		
+	_errorCode := 0;
+END_IF
+
+IF NOT Execute THEN
+	nIndex := 0;
+END_IF
+
+Axis.ReadStatus();
+
+CASE nIndex OF
+	0: // idle state
+		Reset := 0;
+	10: // reset the motor
+		IF Disable() THEN
+			nIndex := 20;
+		END_IF
+	20: // check if there is an error
+		IF Axis.Status.Error THEN
+			nIndex := 30;
+		ELSE
+			nIndex := 40;
+		END_IF
+	30: // reset the axis
+		mcReset.Execute := TRUE;
+		IF mcReset.Done THEN
+			nIndex := 40;
+			mcReset.Execute := FALSE;
+		END_IF
+		mcReset(Axis := Axis);
+	40: // enable the drive
+		IF Enable() THEN
+			nIndex := 60;
+		END_IF
+	60: // done state
+		Reset := 1;
+	70: // error state
+		Reset := -1;
+END_CASE]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="retractPosition" Id="{8b04dd39-5607-4089-bf42-d62c18f1fe92}" FolderPath="Parameters\">
+      <Declaration><![CDATA[PROPERTY retractPosition : LREAL]]></Declaration>
+      <Get Name="Get" Id="{8ef77ab5-4873-4039-bcb7-e118f80a7bb1}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[retractPosition := _parameters.retractPosition;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{7b7b968a-c6b0-41c9-8275-8b54eb02eb80}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[fbMessageChange.ipArguments.Clear().AddString('retractPosition').AddLReal(_parameters.retractPosition).AddLReal(retractPosition);
+fbMessageChange.Send(0);
+_parameters.retractPosition := retractPosition;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <LineIds Name="FB_Cutter">
+      <LineId Id="9" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Cutter.Abort">
+      <LineId Id="5" Count="1" />
+    </LineIds>
+    <LineIds Name="FB_Cutter.Clear">
+      <LineId Id="5" Count="0" />
+      <LineId Id="11" Count="1" />
+      <LineId Id="25" Count="0" />
+      <LineId Id="35" Count="0" />
+      <LineId Id="41" Count="0" />
+      <LineId Id="13" Count="0" />
+      <LineId Id="15" Count="0" />
+      <LineId Id="14" Count="0" />
+      <LineId Id="16" Count="1" />
+      <LineId Id="19" Count="0" />
+      <LineId Id="18" Count="0" />
+      <LineId Id="20" Count="0" />
+      <LineId Id="22" Count="2" />
+      <LineId Id="26" Count="0" />
+      <LineId Id="28" Count="0" />
+      <LineId Id="27" Count="0" />
+      <LineId Id="29" Count="5" />
+      <LineId Id="36" Count="0" />
+      <LineId Id="38" Count="0" />
+      <LineId Id="37" Count="0" />
+      <LineId Id="39" Count="0" />
+      <LineId Id="42" Count="0" />
+      <LineId Id="40" Count="0" />
+      <LineId Id="43" Count="0" />
+      <LineId Id="45" Count="0" />
+      <LineId Id="44" Count="0" />
+      <LineId Id="46" Count="1" />
+      <LineId Id="21" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Cutter.CutSample">
+      <LineId Id="18" Count="0" />
+      <LineId Id="20" Count="1" />
+      <LineId Id="36" Count="0" />
+      <LineId Id="130" Count="0" />
+      <LineId Id="37" Count="1" />
+      <LineId Id="116" Count="0" />
+      <LineId Id="154" Count="0" />
+      <LineId Id="123" Count="2" />
+      <LineId Id="22" Count="0" />
+      <LineId Id="24" Count="0" />
+      <LineId Id="23" Count="0" />
+      <LineId Id="25" Count="1" />
+      <LineId Id="19" Count="0" />
+      <LineId Id="5" Count="0" />
+      <LineId Id="14" Count="0" />
+      <LineId Id="16" Count="0" />
+      <LineId Id="39" Count="4" />
+      <LineId Id="17" Count="0" />
+      <LineId Id="29" Count="0" />
+      <LineId Id="146" Count="0" />
+      <LineId Id="30" Count="0" />
+      <LineId Id="117" Count="1" />
+      <LineId Id="132" Count="0" />
+      <LineId Id="152" Count="0" />
+      <LineId Id="131" Count="0" />
+      <LineId Id="119" Count="0" />
+      <LineId Id="85" Count="0" />
+      <LineId Id="91" Count="0" />
+      <LineId Id="153" Count="0" />
+      <LineId Id="126" Count="0" />
+      <LineId Id="90" Count="0" />
+      <LineId Id="87" Count="0" />
+      <LineId Id="148" Count="1" />
+      <LineId Id="151" Count="0" />
+      <LineId Id="150" Count="0" />
+      <LineId Id="147" Count="0" />
+      <LineId Id="31" Count="0" />
+      <LineId Id="45" Count="0" />
+      <LineId Id="155" Count="0" />
+      <LineId Id="46" Count="0" />
+      <LineId Id="49" Count="0" />
+      <LineId Id="47" Count="1" />
+      <LineId Id="98" Count="1" />
+      <LineId Id="128" Count="0" />
+      <LineId Id="101" Count="1" />
+      <LineId Id="100" Count="0" />
+      <LineId Id="50" Count="2" />
+      <LineId Id="71" Count="0" />
+      <LineId Id="53" Count="2" />
+      <LineId Id="57" Count="0" />
+      <LineId Id="56" Count="0" />
+      <LineId Id="103" Count="1" />
+      <LineId Id="129" Count="0" />
+      <LineId Id="106" Count="1" />
+      <LineId Id="105" Count="0" />
+      <LineId Id="58" Count="0" />
+      <LineId Id="109" Count="3" />
+      <LineId Id="114" Count="0" />
+      <LineId Id="113" Count="0" />
+      <LineId Id="115" Count="0" />
+      <LineId Id="59" Count="1" />
+      <LineId Id="92" Count="1" />
+      <LineId Id="15" Count="0" />
+      <LineId Id="62" Count="0" />
+      <LineId Id="61" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Cutter.cutVelocity.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Cutter.cutVelocity.Set">
+      <LineId Id="5" Count="1" />
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Cutter.Disable">
+      <LineId Id="5" Count="2" />
+    </LineIds>
+    <LineIds Name="FB_Cutter.Enable">
+      <LineId Id="6" Count="1" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Cutter.FB_init">
+      <LineId Id="8" Count="7" />
+      <LineId Id="7" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Cutter.Home">
+      <LineId Id="5" Count="0" />
+      <LineId Id="11" Count="1" />
+      <LineId Id="37" Count="1" />
+      <LineId Id="73" Count="0" />
+      <LineId Id="13" Count="0" />
+      <LineId Id="15" Count="0" />
+      <LineId Id="14" Count="0" />
+      <LineId Id="16" Count="1" />
+      <LineId Id="19" Count="0" />
+      <LineId Id="18" Count="0" />
+      <LineId Id="20" Count="0" />
+      <LineId Id="22" Count="1" />
+      <LineId Id="25" Count="0" />
+      <LineId Id="74" Count="0" />
+      <LineId Id="79" Count="0" />
+      <LineId Id="75" Count="1" />
+      <LineId Id="82" Count="1" />
+      <LineId Id="95" Count="0" />
+      <LineId Id="85" Count="0" />
+      <LineId Id="84" Count="0" />
+      <LineId Id="77" Count="0" />
+      <LineId Id="33" Count="0" />
+      <LineId Id="81" Count="0" />
+      <LineId Id="36" Count="0" />
+      <LineId Id="42" Count="0" />
+      <LineId Id="35" Count="0" />
+      <LineId Id="69" Count="1" />
+      <LineId Id="96" Count="0" />
+      <LineId Id="72" Count="0" />
+      <LineId Id="71" Count="0" />
+      <LineId Id="43" Count="2" />
+      <LineId Id="47" Count="0" />
+      <LineId Id="46" Count="0" />
+      <LineId Id="65" Count="1" />
+      <LineId Id="97" Count="0" />
+      <LineId Id="68" Count="0" />
+      <LineId Id="67" Count="0" />
+      <LineId Id="48" Count="1" />
+      <LineId Id="54" Count="0" />
+      <LineId Id="50" Count="2" />
+      <LineId Id="55" Count="0" />
+      <LineId Id="53" Count="0" />
+      <LineId Id="60" Count="1" />
+      <LineId Id="64" Count="0" />
+      <LineId Id="63" Count="0" />
+      <LineId Id="62" Count="0" />
+      <LineId Id="41" Count="0" />
+      <LineId Id="56" Count="0" />
+      <LineId Id="58" Count="1" />
+      <LineId Id="26" Count="0" />
+      <LineId Id="21" Count="0" />
+      <LineId Id="28" Count="4" />
+      <LineId Id="39" Count="0" />
+      <LineId Id="27" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Cutter.IsEnabled.Get">
+      <LineId Id="2" Count="0" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Cutter.MonitorParameters">
+      <LineId Id="5" Count="2" />
+      <LineId Id="9" Count="0" />
+      <LineId Id="8" Count="0" />
+      <LineId Id="10" Count="1" />
+    </LineIds>
+    <LineIds Name="FB_Cutter.MoveAbs">
+      <LineId Id="5" Count="0" />
+      <LineId Id="11" Count="1" />
+      <LineId Id="24" Count="0" />
+      <LineId Id="13" Count="0" />
+      <LineId Id="15" Count="0" />
+      <LineId Id="14" Count="0" />
+      <LineId Id="16" Count="1" />
+      <LineId Id="19" Count="0" />
+      <LineId Id="18" Count="0" />
+      <LineId Id="20" Count="0" />
+      <LineId Id="22" Count="1" />
+      <LineId Id="25" Count="4" />
+      <LineId Id="31" Count="0" />
+      <LineId Id="30" Count="0" />
+      <LineId Id="32" Count="1" />
+      <LineId Id="35" Count="0" />
+      <LineId Id="38" Count="0" />
+      <LineId Id="34" Count="0" />
+      <LineId Id="36" Count="1" />
+      <LineId Id="39" Count="2" />
+      <LineId Id="21" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Cutter.Parameters.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Cutter.Parameters.Set">
+      <LineId Id="5" Count="0" />
+      <LineId Id="2" Count="0" />
+      <LineId Id="8" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Cutter.Reset">
+      <LineId Id="5" Count="0" />
+      <LineId Id="14" Count="1" />
+      <LineId Id="39" Count="0" />
+      <LineId Id="70" Count="0" />
+      <LineId Id="93" Count="2" />
+      <LineId Id="84" Count="0" />
+      <LineId Id="96" Count="0" />
+      <LineId Id="16" Count="0" />
+      <LineId Id="18" Count="0" />
+      <LineId Id="17" Count="0" />
+      <LineId Id="19" Count="1" />
+      <LineId Id="31" Count="1" />
+      <LineId Id="22" Count="0" />
+      <LineId Id="21" Count="0" />
+      <LineId Id="23" Count="0" />
+      <LineId Id="25" Count="1" />
+      <LineId Id="80" Count="0" />
+      <LineId Id="28" Count="0" />
+      <LineId Id="81" Count="0" />
+      <LineId Id="29" Count="1" />
+      <LineId Id="33" Count="0" />
+      <LineId Id="35" Count="1" />
+      <LineId Id="34" Count="0" />
+      <LineId Id="37" Count="1" />
+      <LineId Id="40" Count="1" />
+      <LineId Id="43" Count="0" />
+      <LineId Id="42" Count="0" />
+      <LineId Id="44" Count="1" />
+      <LineId Id="82" Count="0" />
+      <LineId Id="48" Count="1" />
+      <LineId Id="58" Count="1" />
+      <LineId Id="78" Count="1" />
+      <LineId Id="24" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Cutter.retractPosition.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Cutter.retractPosition.Set">
+      <LineId Id="2" Count="0" />
+      <LineId Id="5" Count="1" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

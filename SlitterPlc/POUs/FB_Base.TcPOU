@@ -1,0 +1,289 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.3">
+  <POU Name="FB_Base" Id="{cd4a5ab4-c349-4e03-95bd-77d3155a87fa}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Base IMPLEMENTS I_UnitState
+VAR_INPUT
+	eCommand			: Tc3_PackML_V2.E_PMLCommand;
+	eModeCommand		: DINT;
+END_VAR
+VAR_OUTPUT
+	eState				: Tc3_PackML_V2.E_PMLState;	
+	sState				: STRING;		
+	eMode				: DINT;	
+END_VAR
+VAR
+	nState				: INT;
+	nClearingState		: INT;
+	rTrig				: R_TRIG;
+	ePreviousState		: Tc3_PackML_V2.E_PMLState;
+	fbStateMachine		: Tc3_PackML_V2.PML_StateMachine;
+	fbUnitModeConfig	: Tc3_PackML_V2.PML_UnitModeConfig;
+	fbUnitModeManager	: Tc3_PackML_V2.PML_UnitModeManager;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[fbStateMachine(
+	eMode := eMode,
+	eCommand := eCommand,
+	eState => eState,
+	sState => sState);
+
+// control the mode of the PackML state machine 
+// e.g. production, manual, maintenance)
+fbUnitModeManager(
+	bExecute := (eMode <> eModeCommand),
+	eModeCommand := eModeCommand,
+	eState := eState,
+	eModeStatus => eMode);
+IF fbUnitModeManager.bError THEN
+	fbUnitModeManager(bExecute := FALSE);
+END_IF
+
+// all the case statement in each PackML method use the same index
+// this index is reset to zero when the PackML state changes
+IF ePreviousState <> eState THEN
+	ePreviousState := eState;
+	nState := 0;
+	nClearingState := 0;
+END_IF
+
+// execute PackML method based on PackML state
+CASE eState OF
+	ePMLState_Undefined: M_Undefined();
+	ePMLState_Clearing: M_Clearing();
+	ePMLState_Stopped: M_Stopped();
+	ePMLState_Starting: M_Starting();
+	ePMLState_Idle: M_Idle();
+	ePMLState_Suspended: M_Suspended();
+	ePMLState_Execute: M_Execute();
+	ePMLState_Stopping: M_Stopping();
+	ePMLState_Aborting: M_Aborting();
+	ePMLSTate_Aborted: M_Aborted();
+	ePMLState_Holding: M_Holding();
+	ePMLState_Held: M_Held();
+	ePMLState_Unholding: M_Unholding();
+	ePMLState_Suspending: M_Suspending();
+	ePMLState_Unsuspending: M_Unsuspending();
+	ePMLState_Resetting: M_Resetting();
+	ePMLState_Completing: M_Completing();
+	ePMLState_Complete: M_Complete();
+END_CASE	
+]]></ST>
+    </Implementation>
+    <Method Name="M_Aborted" Id="{ec47a2f7-9a29-458f-86c0-59d4b3c2bbea}">
+      <Declaration><![CDATA[
+METHOD M_Aborted
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Aborting" Id="{82c8f903-9c21-4cd7-85ac-adb6c9a974c4}">
+      <Declaration><![CDATA[
+METHOD M_Aborting
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Clearing" Id="{7249ea34-72e7-4dbf-b0f5-e55bc4c47c50}">
+      <Declaration><![CDATA[
+METHOD M_Clearing
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Complete" Id="{611e74df-b2df-489e-80ce-0f0b7e56869c}">
+      <Declaration><![CDATA[
+METHOD M_Complete
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Completing" Id="{7213aedc-1d9c-478d-b34c-262413809c2b}">
+      <Declaration><![CDATA[
+METHOD M_Completing
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Execute" Id="{35ae3426-a98a-405b-827a-abd96d477555}">
+      <Declaration><![CDATA[
+METHOD M_Execute
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Held" Id="{c4247b1b-3b42-4326-92e8-a7feb7b23391}">
+      <Declaration><![CDATA[
+METHOD M_Held
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Holding" Id="{c5da3d9b-191a-4595-9979-dbff1efe6384}">
+      <Declaration><![CDATA[
+METHOD M_Holding
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Idle" Id="{6be251a8-3264-473a-a207-672821b631ce}">
+      <Declaration><![CDATA[
+METHOD M_Idle
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Resetting" Id="{024ff0f4-4388-4dca-8e97-b3d5a91b7213}">
+      <Declaration><![CDATA[
+METHOD M_Resetting
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Starting" Id="{1d192923-fb26-4177-8b90-3b6c83ca7dc5}">
+      <Declaration><![CDATA[
+METHOD M_Starting
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_StateComplete" Id="{0f8f019e-c402-4641-abe3-d5d32f1b3b93}">
+      <Declaration><![CDATA[METHOD M_StateComplete
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[fbStateMachine.M_StateComplete();]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Stopped" Id="{bc95f3d6-ac52-4143-a490-a3de78624a15}">
+      <Declaration><![CDATA[
+METHOD M_Stopped
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Stopping" Id="{d03feace-3481-47fe-aaae-6ac19dfcb6cb}">
+      <Declaration><![CDATA[
+METHOD M_Stopping
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Suspended" Id="{4282fdfe-ac5d-47ed-90f4-b7da02d57921}">
+      <Declaration><![CDATA[
+METHOD M_Suspended
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Suspending" Id="{96ab8114-0942-4bab-9a0d-0ef71b996e67}">
+      <Declaration><![CDATA[
+METHOD M_Suspending
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Undefined" Id="{dbf9972f-3c1f-44fe-b613-bfc9e8dcf7ef}">
+      <Declaration><![CDATA[
+METHOD M_Undefined
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Unholding" Id="{0db723d3-64b8-4240-892e-1976cd6e616b}">
+      <Declaration><![CDATA[
+METHOD M_Unholding
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Unsuspending" Id="{dba68081-65b7-452d-bea4-a05ff448c152}">
+      <Declaration><![CDATA[
+METHOD M_Unsuspending
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <LineIds Name="FB_Base">
+      <LineId Id="27" Count="21" />
+      <LineId Id="93" Count="0" />
+      <LineId Id="49" Count="2" />
+      <LineId Id="54" Count="19" />
+      <LineId Id="9" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Base.M_Aborted">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Base.M_Aborting">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Base.M_Clearing">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Base.M_Complete">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Base.M_Completing">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Base.M_Execute">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Base.M_Held">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Base.M_Holding">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Base.M_Idle">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Base.M_Resetting">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Base.M_Starting">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Base.M_StateComplete">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Base.M_Stopped">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Base.M_Stopping">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Base.M_Suspended">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Base.M_Suspending">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Base.M_Undefined">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Base.M_Unholding">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Base.M_Unsuspending">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

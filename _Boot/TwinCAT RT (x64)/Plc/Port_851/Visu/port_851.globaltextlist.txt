@@ -1,0 +1,233 @@
+Id;Default
+172;$TTube Cutting and Inspection System
+301;    Tube Cutting and Inspection System
+353;    Tube Cutting and Inspection System       
+1384;%0.1f
+965;%0.2f
+1097;%0.2f deg
+358;%0.2f mmHg
+162;%0.3f mm
+205;%d
+2490;%s
+362;ABORT
+725;ActPos = %0.2f mm
+312;ActVel = %0.2f mm/s
+1624;Air System
+951;angle = %0.2f deg
+1389;Assembly Commands
+963;Axis Error = %d
+2298;Batch 
+900;Blob Center (col) = %0.2f px
+1783;Blob Center (row) = %0.2f px
+1763;Blob delta(column) = %0.2f px
+553;Blob delta(row) = %0.2f px
+1787;Blob Height = %0.2f px
+751;Blob Length = %0.2f px
+259;Calibrate Camera
+947;Calibrate Cut Position
+1470;Calibrate Mandrel
+287;Calibration Parameters and Results
+136;Camera
+2485;Camera Angle
+190;Camera Control
+1086;Change Password
+1297;Column = %0.2f px
+851;Commands
+336;Compute
+1620;Count = %0.0f
+967;Current Position = %0.2f deg
+398;Current Position = %0.2f mm
+1843;Current Position = %0.2f mm/s
+2143;Cut Distance from Center (mm) for X and Y
+11;Cut Height
+666;Cut Length
+260;Cut Position
+2291;Cut Position Tolerance
+647;Cut Results
+482;Cut Sample
+914;Cut Velocity = %0.2f mm/s
+803;Cutter
+2144;cutter = %0.2f mm
+174;cutter = %0.2f mm/s
+1056;Cutter Angle
+625;Cutter Control
+1255;Cutter Retract
+1395;Decrement Spindle
+848;Description
+964;Detection Adjustment
+1927;Diameter
+937;distance = %0.2f mm
+2843;Door 1
+1997;Door 2
+280;Door 3
+1431;Door 4
+785;Edge Detection
+530;Edit Users
+616;Eject Position
+92;Eject Positions
+347;Eject Sample
+651;Eject Sample Fail
+1311;Eject Sample Pass
+313;Ejector
+1875;ejector = %0.2f mm/s
+688;Ejector Commands
+525;Ejector Control
+1941;Ejector Reset
+978;Enable/Disable 
+968;Enable/Disable Axis
+1502;Enable/Disable X
+506;Error
+860;Error Spindle = %d
+469;Error X = %d
+217;Error Y = %d
+749;Exit
+137;Extend X Axis
+983;Extend Z Axis
+1523;Failed
+2687;FAILED
+1148;for
+408;Frame
+131;Frame 
+894;Height = %0.2f px
+520;Home
+794;Inc = %0.2f degrees
+988;Increment Spindle
+2749;Initializing
+1537;Inspect
+957;Inspect Position
+80;Inspect Sample
+37;Inspection Criteria
+211;Inspection Results
+2484;Inspection without Compensation 
+2596;Left Finger Switch
+104;length = %0.2f mm
+1018;Length = %0.3f mm
+316;Load Position
+1065;Load Positions
+706;Location
+1363;Login
+839;Lower the Mandrel
+2848;Machine Parameters
+1538;Machine Settings
+2455;Machine Status
+258;Mandrel
+379;Mandrel Control
+201;Mandrel Vacuum
+708;Manual 
+2224;Manual Control
+33;Manual Inspection
+1169;Max = %0.2f mm
+82;Min = %0.2f mm
+314;mm per px (col) = %0.4f
+1885;mm per px (row) = %0.4f
+476;Motion Error = %d
+795;Move Absolute
+299;Move Axis
+328;Move To Cut Position
+88;Move To Eject Position
+389;Move To Inspect Position
+100;Move To Load Position
+415;Move To Pass
+1118;Move To Pick Up
+1894;Move To Reject
+742;Move Vacuum Axis
+39;Neutral X Axis
+663;Neutral Z Axis 
+583;No Image Detected
+552;Operation
+872;Part Count
+2012;Part Diameter = %0.2f mm
+556;Part Pocket Depth = %0.2f mm
+399;pass = %0.2f mm
+1639;Pass Position = %0.2f mm
+1945;Pass Position = %0.2f mm/s
+1627;PASSED
+1216;Pattern Match
+852;Peak (col) = %0.2f px
+1402;Peak (row) = %0.2f px
+111;pick up = %0.2f mm
+853;Pick Up Position = %0.2f mm
+1237;Pick Up Position = %0.2f mm/s
+1584;Pocket Depth
+637;Position = %0.2f mm
+1324;Pressure (PSIG):
+1133;Processing
+1762;Product Code
+1284;Product Dimensions
+2416;Product Selection
+2364;Product Settings
+896;Raise the Mandrel
+101;Raw Data
+2390;Ready
+401;reject = %0.2f mm
+2075;Reject Position = %0.2f mm
+1351;Reject Position = %0.2f mm/s
+822;Reset
+1561;RESET
+1383;Reset Axis
+241;Reset Motors
+1964;Reset Vacuum Axis
+81;Retract Position = %0.2f mm
+19;Retract X Axis
+248;Retract Z Axis
+180;Return Tube
+502;Right Finger Switch
+1149;Row = %0.2f px
+1218;Running
+1943;Save
+1105;Save Parameters
+338;Selection
+537;spindle = %0.2f mm/s
+498;Spindle Enable Toggle
+1285;Spindle Increment (degrees):
+551;Status = %s
+703;Subassembly
+213;Target Torque = %d %% MaxTorque
+194;Toggle Blow Off Air
+1748;Toggle Green Light
+187;Toggle Pick Up Vauum
+5;Trigger Camera
+1782;Tube 
+1108;Tube 1
+2424;Tube 2
+1718;Tube 3
+1340;Tube 4
+1168;Tube 5
+1675;Tube Cutting and Inspection System
+462;Tube Selection 
+989;User Management
+414;Vacuum
+2031;vacuum = %0.2f deg/s
+638;Vacuum = %0.2f mmHg
+2116;Vacuum Control
+758;Vacuum Position$T
+1382;Vacuum Position = %0.2f deg
+1439;Vacuum Threshold$T
+1983;Velocities
+382;Velocity = %0.2f deg/s
+210;Velocity = %0.2f mm/s
+591;VelocityX = %0.0f mm/s
+102;VelocityY = %0.0f mm/s
+318;View Calibration Info
+45;View Inspection Results
+1128;View Raw Data
+1446;Vision Data and Results (pixels)
+297;Width = %0.2f px
+79;x = %0.2f mm
+311;x = %0.2f mm/s
+1409;x = %0.3f mm
+507;x = %0.4f mm
+1287;X Axis
+133;X Motor Enable Toggle
+433;x1 = %0.2f pixel
+737;x2 = %0.2f pixel
+290;x3 = %0.2f pixel
+962;y = %0.2f mm
+2972;y = %0.2f mm/s
+1832;y = %0.4f mm
+661;Y Motor Enable Toggle
+372;y1 = %0.2f pixel
+278;y2 = %0.2f pixel
+1084;y3 = %0.2f pixel
+266;y= %0.3f mm
+461;Z Actuator

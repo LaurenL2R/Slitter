@@ -1,0 +1,1576 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.9">
+  <POU Name="FB_Mandrel" Id="{ceb5d6d9-b860-4018-a7f1-2187e2ddbaba}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Mandrel
+VAR_INPUT
+END_VAR
+VAR_OUTPUT
+END_VAR
+VAR
+	// I/O
+	Yaxis					: AXIS_REF;			// main axis that goes into and out
+	Xaxis					: AXIS_REF;			// cross axis that goes left and right
+	Spindle					: AXIS_REF; 		// rotational axis
+	VacAxis					: FB_Axis;
+	ModeOfOp	AT %Q*		: SINT := 8;		// required by the stepper motor module 
+	doVacuum	AT %Q*		: BOOL;				// turns the vacuum on/off
+	doStripperExtend AT %Q*	: BOOL;				// actuates the stripper plate
+	doStripperRetract AT %Q*: BOOL;
+	diVacuumSensor AT %I*	: BOOL;
+	aoVacuumSenosr AT %I*	: INT;
+	// motion fb's
+	mcMoveAbsY				: MC_MoveAbsolute;
+	mcMoveRelY				: MC_MoveRelative;
+	mcMoveAbsX				: MC_MoveAbsolute;
+	mcMoveRelX				: MC_MoveRelative;
+	mcMoveRelSpindle		: MC_MoveRelative;
+	mcPowerY				: MC_Power;
+	mcPowerX				: MC_Power;
+	mcPowerSpindle			: MC_Power;
+	mcResetX				: MC_Reset;
+	mcResetY				: MC_Reset;
+	mcResetSpindle			: MC_Reset;
+	
+// variables in methods
+	LiftSampleTon			: TON := (PT := T#500MS);
+	LowerSampleTon			: TON := (PT := T#500MS);
+	
+	_SpindleIncrement		: LREAL;
+	_tubeParameters			: ST_TubeParameters;
+	_vacuum_mmHg			: REAL;	
+	_hmiParameters			: ST_MandrelParameters;
+	_parameters				: ST_MandrelParameters;
+	fbMessageChange			: FB_TcMessage;
+	fbMessageLoaded			: FB_TcMessage;
+
+END_VAR
+
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[]]></ST>
+    </Implementation>
+    <Folder Name="Parameters" Id="{40447caa-6934-4ccc-b689-c94e8d6ad972}" />
+    <Method Name="Abort" Id="{9c58e4cd-87c8-469d-95cb-f4f4fcdc513a}">
+      <Declaration><![CDATA[METHOD Abort : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[DisableSpindle();
+DisableX();
+DisableY();
+VacAxis.Disable();
+doStripperExtend := FALSE;
+doStripperRetract := FALSE;
+MandrelVacuum := FALSE;
+
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="Clear" Id="{ac3bba6b-8400-45d8-9882-cb9d66e9b1f2}">
+      <Declaration><![CDATA[METHOD Clear : INT
+VAR_INPUT
+	Execute	: BOOL;
+END_VAR
+VAR_INST
+	rTrig	: R_TRIG;
+	nIndex	: INT;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	nIndex := 10;
+	Reset(Execute := FALSE);
+	MoveToLoadPosition(Execute := FALSE);
+	VacAxis.AbsMove(Execute := FALSE, Position := 0, Velocity := 0);
+END_IF
+
+IF NOT Execute THEN
+	nIndex := 0;
+END_IF
+
+CASE nIndex OF
+	0: // idle state
+		Clear := 0;
+	10: // reset the mandrel
+		IF Reset(Execute := TRUE) = 1 THEN
+			Reset(Execute := FALSE);
+			nIndex := 20;
+		END_IF
+	20: // lower the sample
+		IF LowerSample() = 1 THEN
+			nIndex := 30;
+		END_IF
+	30: // move to load position
+		IF MoveToLoadPosition(Execute := TRUE) = 1 THEN
+			MoveToLoadPosition(Execute := FALSE);
+			nIndex := 40;
+		END_IF
+	40: // move the vacuum axis to the vacuum position
+		IF VacAxis.AbsMove(Execute := TRUE, Position := _tubeParameters.VacPosition, Velocity := VacuumVelocity) = 1 THEN
+			VacAxis.AbsMove(Execute := FALSE, Position := 0, Velocity := 0);
+			nIndex := 50;
+		END_IF
+	50: // done state
+		Clear := 1; 
+END_CASE]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="ConvertVaccum" Id="{c15ea9aa-e156-493b-a9e1-932a14c441b7}">
+      <Declaration><![CDATA[METHOD ConvertVaccum : BOOL
+VAR_INPUT
+END_VAR
+VAR_INST
+	VacuumSensorV	: REAL;
+END_VAR
+VAR
+	VacuumSlope		: REAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[VacuumSensorV := INT_TO_REAL(aoVacuumSenosr) * 10 / 32767.0;
+(* 1V = 0 mmHg, 5V = 760 mmHg *)
+VacuumSlope := 760 / 4.0;
+_vacuum_mmHg := VacuumSlope * VacuumSensorV - VacuumSlope;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="DisableSpindle" Id="{1aea3ea3-509b-46fc-88a4-80d737502afc}">
+      <Declaration><![CDATA[METHOD DisableSpindle : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[mcPowerSpindle(Axis := Spindle, Enable := FALSE);
+Spindle.ReadStatus();
+DisableSpindle := NOT Spindle.Status.Operational;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="DisableX" Id="{7e3fd248-ada6-4ba3-a6ce-f8496e9a9142}">
+      <Declaration><![CDATA[METHOD DisableX : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[mcPowerX(Axis := XAxis, Enable := FALSE);
+XAxis.ReadStatus();
+DisableX := NOT XAxis.Status.Operational;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="DisableY" Id="{99b8327a-f074-4d03-8d6d-3302658598bf}">
+      <Declaration><![CDATA[METHOD DisableY : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[mcPowerY(Axis := YAxis, Enable := FALSE);
+YAxis.ReadStatus();
+DisableY := NOT YAxis.Status.Operational;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="EnableSpindle" Id="{21e68420-88f3-460b-813b-27d5d513b07b}">
+      <Declaration><![CDATA[METHOD EnableSpindle : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[mcPowerSpindle(
+	Axis := Spindle, 
+	Enable := TRUE,
+	Enable_Positive := TRUE,
+	Enable_Negative := TRUE);
+Spindle.ReadStatus();
+EnableSpindle := Spindle.Status.Operational;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="EnableX" Id="{305476bd-34eb-4309-8d6b-2ed0e2bf5e4c}">
+      <Declaration><![CDATA[METHOD EnableX : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[mcPowerX(
+	Axis := XAxis, 
+	Enable := TRUE,
+	Enable_Positive := TRUE,
+	Enable_Negative := TRUE);
+XAxis.ReadStatus();
+EnableX := XAxis.Status.Operational;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="EnableY" Id="{1707f8b7-d218-4fab-bc9a-1d5dd2f6a31b}">
+      <Declaration><![CDATA[METHOD EnableY : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[mcPowerY(
+	Axis := YAxis, 
+	Enable := TRUE,
+	Enable_Positive := TRUE,
+	Enable_Negative := TRUE);
+YAxis.ReadStatus();
+EnableY := YAxis.Status.Operational;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="FB_init" Id="{5f530fda-2bc5-46dc-bd6b-ec0e91fc7f0d}">
+      <Declaration><![CDATA[METHOD FB_init : BOOL
+VAR_INPUT
+	bInitRetains : BOOL; // if TRUE, the retain variables are initialized (warm start / cold start)
+	bInCopyCode : BOOL;  // if TRUE, the instance afterwards gets moved into the copy code (online change)
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF NOT fbMessageChange.EqualsToEventEntryEx(stOther := TC_EVENTS.SlitterEvents.ParameterChange) THEN
+	fbMessageChange.CreateEx(TC_EVENTS.SlitterEvents.ParameterChange, 0);
+	fbMessageChange.ipArguments.Clear();
+END_IF
+
+IF NOT fbMessageLoaded.EqualsToEventEntryEx(stOther := TC_EVENTS.SlitterEvents.ParametersLoadedFromFile) THEN
+	fbMessageLoaded.CreateEx(TC_EVENTS.SlitterEvents.ParametersLoadedFromFile, 0);
+	fbMessageLoaded.ipArguments.Clear().AddString('Mandrel');
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="LiftSample" Id="{db4fb91e-91d5-4c19-bf11-eeed83e21151}">
+      <Declaration><![CDATA[METHOD LiftSample : INT
+VAR_INPUT
+END_VAR
+VAR_INST
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[doStripperExtend := TRUE;
+doStripperRetract := FALSE;
+LiftSample := 0;
+LiftSampleTon(IN := TRUE);
+IF LiftSampleTon.Q THEN
+	LiftSample := 1;
+	LiftSampleTon(IN := FALSE);
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="loadPositionX" Id="{fd3dc9df-e154-4cd9-9938-17fb9641dbc6}" FolderPath="Parameters\">
+      <Declaration><![CDATA[PROPERTY loadPositionX : LREAL]]></Declaration>
+      <Get Name="Get" Id="{28a2771e-e9e6-4712-9a3e-b9de470a1c39}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[loadPositionX := _parameters.loadPositionX;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{5214fef4-0cf7-4ace-8e0f-035deca03425}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[fbMessageChange.ipArguments.Clear().AddString('loadPositionX').AddLReal(_parameters.loadPositionX).AddLReal(loadPositionX);
+fbMessageChange.Send(0);
+_parameters.loadPositionX := loadPositionX;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="loadPositionY" Id="{7107763a-fe07-4621-aebb-e4611d5cb60c}" FolderPath="Parameters\">
+      <Declaration><![CDATA[PROPERTY loadPositionY : LREAL]]></Declaration>
+      <Get Name="Get" Id="{89a72b89-4e6d-4e01-b100-d6b752d73786}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[loadPositionY := _parameters.loadPositionY;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{b0acb7d2-db5b-4aa9-9068-28334da79c23}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[fbMessageChange.ipArguments.Clear().AddString('loadPositionY').AddLReal(_parameters.loadPositionY).AddLReal(loadPositionY);
+fbMessageChange.Send(0);
+_parameters.loadPositionY := loadPositionY;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Method Name="LowerSample" Id="{62b3094f-1794-48f0-b4da-78b33efe3b4c}">
+      <Declaration><![CDATA[METHOD LowerSample : INT
+VAR_INPUT
+END_VAR
+
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[doStripperExtend := FALSE;
+doStripperRetract := TRUE;
+LowerSample := 0;
+LowerSampleTon(IN := TRUE);
+IF LowerSampleTon.Q THEN
+	LowerSample := 1;
+	LowerSampleTon(IN := FALSE);
+	doStripperRetract := FALSE;
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="MandrelVacuum" Id="{f54ee06b-7ada-418f-bc48-c05668e29c1b}">
+      <Declaration><![CDATA[PROPERTY MandrelVacuum : BOOL]]></Declaration>
+      <Get Name="Get" Id="{883d9f28-343f-4813-ac6e-4bfa852d44e2}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[MandrelVacuum := doVacuum;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{a2f4d9a9-c63e-490e-86b5-b9a2ef701f89}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[doVacuum := MandrelVacuum;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Method Name="MonitorParameters" Id="{25e5b142-22c8-4df4-a7d0-5f58e4b07a44}" FolderPath="Parameters\">
+      <Declaration><![CDATA[METHOD MonitorParameters : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF _hmiParameters.loadPositionX <> loadPositionX THEN
+	loadPositionX := _hmiParameters.loadPositionX;
+END_IF
+
+IF _hmiParameters.loadPositionY <> loadPositionY THEN
+	loadPositionY := _hmiParameters.loadPositionY;
+END_IF
+
+IF _hmiParameters.spindleOffset <> SpindleOffset THEN
+	SpindleOffset := _hmiParameters.spindleOffset;
+END_IF
+
+IF _hmiParameters.spindleVelocity <> spindleVelocity THEN
+	spindleVelocity := _hmiParameters.spindleVelocity;
+END_IF
+
+IF _hmiParameters.velocityX <> velocityX THEN
+	velocityX := _hmiParameters.velocityX;
+END_IF
+
+IF _hmiParameters.velocityY <> velocityY THEN
+	velocityY := _hmiParameters.velocityY;
+END_IF
+
+IF _hmiParameters.vacuumVelocity <> VacuumVelocity THEN
+	VacuumVelocity := _hmiParameters.vacuumVelocity;
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="MoveToCutPosition" Id="{af52b372-66ce-4403-b96c-3740cc8f3958}">
+      <Declaration><![CDATA[METHOD MoveToCutPosition : INT
+VAR_INPUT
+	Execute	: BOOL;
+	CutPositionX : LREAL;
+	CutPositionY : LREAL;
+END_VAR
+VAR_INST
+	nIndex	: INT;
+	rTrig	: R_TRIG;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	nIndex := 10;
+	mcMoveAbsX(Axis := Xaxis, Execute := FALSE);
+	mcMoveAbsY(Axis := YAxis, Execute := FALSE);
+	mcMoveRelSpindle(Axis := Spindle, Execute := FALSE);
+	MoveToCutPosition := 0;
+END_IF
+
+IF NOT Execute THEN
+	nIndex := 0;
+END_IF
+
+CASE nIndex OF
+	0: // idle state
+		MoveToCutPosition := 0;
+	10: // move
+		mcMoveAbsX.Execute := TRUE;
+		mcMoveAbsX.Position := CutPositionX;
+		mcMoveAbsX.Velocity := _parameters.velocityX;
+		
+		mcMoveAbsY.Execute := TRUE;
+		mcMoveAbsY.Position := CutPositionY;
+		mcMoveAbsY.Velocity := _parameters.velocityY;
+		
+		mcMoveRelSpindle.Execute := TRUE;
+		mcMoveRelSpindle.Distance := 3.14159;
+		mcMoveRelSpindle.Velocity := 20;
+		
+		IF mcMoveAbsX.Done AND mcMoveAbsY.Done AND mcMoveRelSpindle.Done THEN
+			mcMoveAbsX.Execute := FALSE;
+			mcMoveAbsY.Execute := FALSE;
+			mcMoveRelSpindle.Execute := FALSE;
+			nIndex := 20;
+		END_IF
+		mcMoveAbsX(Axis := XAxis);
+		mcMoveAbsY(Axis := YAxis);
+		mcMoveRelSpindle(Axis := Spindle);
+	20: // done state
+		MoveToCutPosition := 1;
+	30: // error state
+		MoveToCutPosition := -1;	
+END_CASE
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="MoveToEjectPosition" Id="{dcc67b92-5987-4e8f-86e9-7b768c7aa605}">
+      <Declaration><![CDATA[METHOD MoveToEjectPosition : INT
+VAR_INPUT
+	Execute: BOOL;
+	EjectPositionX : LREAL;
+	EjectPositionY : LREAL;
+END_VAR
+
+VAR_INST
+	rTrig: R_TRIG;
+	nIndex: INT;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	nIndex := 10;
+	mcMoveAbsX(Axis := Xaxis, Execute := FALSE);
+	mcMoveAbsY(Axis := YAxis, Execute := FALSE);
+END_IF
+
+IF NOT Execute THEN
+	nIndex := 0;
+END_IF
+
+CASE nIndex OF
+	0: // idle state
+		MoveToEjectPosition := 0;
+	10: // move
+		mcMoveAbsX.Execute := TRUE;
+		mcMoveAbsX.Position := EjectPositionX;
+		mcMoveAbsX.Velocity := _parameters.velocityX;
+		
+		mcMoveAbsY.Execute := TRUE;
+		mcMoveAbsY.Position := EjectPositionY;
+		mcMoveAbsY.Velocity := _parameters.velocityY;
+		
+		IF mcMoveAbsX.Done AND mcMoveAbsY.Done THEN
+			mcMoveAbsX.Execute := FALSE;
+			mcMoveAbsY.Execute := FALSE;
+			nIndex := 20;
+		END_IF
+		IF mcMoveAbsX.Error THEN
+			mcMoveAbsX.Execute := FALSE;
+			nIndex := 30;
+		END_IF
+		mcMoveAbsX(Axis := XAxis);
+		mcMoveAbsY(Axis := YAxis);
+	20: // done state
+		MoveToEjectPosition := 1;
+	30: // error state
+		MoveToEjectPosition := -1;	
+END_CASE
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="MoveToInspectPosition" Id="{fbbd8932-e22d-4cdc-8f6c-775488f8d1ce}">
+      <Declaration><![CDATA[METHOD MoveToInspectPosition : INT
+VAR_INPUT
+	Execute	: BOOL;
+	InspectPositionX : LREAL;
+	InspectPositionY : LREAL;
+END_VAR
+VAR_INST
+	rTrig	: R_TRIG;
+	nIndex	: INT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	nIndex := 10;
+	mcMoveAbsX(Axis := Xaxis, Execute := FALSE);
+	mcMoveAbsY(Axis := YAxis, Execute := FALSE);
+	mcMoveRelSpindle(Axis := Spindle, Execute := FALSE);
+END_IF
+
+IF NOT Execute THEN
+	nIndex := 0;
+END_IF
+
+CASE nIndex OF
+	0: // idle state
+		MoveToInspectPosition := 0;
+	10: // move
+		mcMoveRelSpindle.Execute := TRUE;
+		mcMoveRelSpindle.Distance := _parameters.spindleOffset;
+		mcMoveRelSpindle.Velocity := _parameters.spindleVelocity;
+		
+		mcMoveAbsX.Execute := TRUE;
+		mcMoveAbsX.Position := InspectPositionX;
+		mcMoveAbsX.Velocity := _parameters.velocityX;
+		
+		mcMoveAbsY.Execute := TRUE;
+		mcMOveAbsY.Position := InspectPositionY;
+		mcMoveAbsY.Velocity := _parameters.velocityY;
+		
+		IF mcMoveAbsX.Done AND mcMoveAbsY.Done AND mcMoveRelSpindle.Done THEN
+			mcMoveAbsX.Execute := FALSE;
+			mcMoveAbsY.Execute := FALSE;
+			mcMoveRelSpindle.Execute := FALSE;
+			nIndex := 20;
+		END_IF
+		IF mcMoveAbsX.Error THEN
+			mcMoveAbsX.Execute := FALSE;
+			nIndex := 30;
+		END_IF
+		mcMoveAbsX(Axis := XAxis);
+		mcMoveAbsY(Axis := YAxis);
+		mcMoveRelSpindle(Axis := Spindle);
+	20: // done state
+		MoveToInspectPosition := 1;
+	30: // error state
+		MoveToInspectPosition := -1;	
+END_CASE
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="MoveToLoadPosition" Id="{98ade727-31b8-43af-8b45-60960501dc87}">
+      <Declaration><![CDATA[METHOD MoveToLoadPosition : INT
+VAR_INPUT
+	Execute: BOOL;
+END_VAR
+
+VAR_INST
+	rTrig: R_TRIG;
+	nIndex: INT;
+	debug : INT;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	nIndex := 10;
+	mcMoveAbsX(Axis := Xaxis, Execute := FALSE);
+	mcMoveAbsY(Axis := YAxis, Execute := FALSE);
+END_IF
+
+IF NOT Execute THEN
+	debug := debug + 1;
+	nIndex := 0;
+END_IF
+
+CASE nIndex OF
+	0: // idle state
+		MoveToLoadPosition := 0;
+	10: // move
+		mcMoveAbsX.Execute := TRUE;
+		mcMoveAbsX.Position := _parameters.loadPositionX;
+		mcMoveAbsX.Velocity := _parameters.velocityX;
+		
+		mcMoveAbsY.Execute := TRUE;
+		mcMoveAbsY.Position := _parameters.loadPositionY;
+		mcMoveAbsY.Velocity := _parameters.velocityY;
+		
+		IF mcMoveAbsX.Done AND mcMoveAbsY.Done THEN
+			mcMoveAbsX.Execute := FALSE;
+			mcMoveAbsY.Execute := FALSE;
+			nIndex := 20;
+		END_IF
+		IF mcMoveAbsX.Error THEN
+			mcMoveAbsX.Execute := FALSE;
+			nIndex := 30;
+		END_IF
+		mcMoveAbsX(Axis := XAxis);
+		mcMoveAbsY(Axis := YAxis);
+	20: // done state
+		MoveToLoadPosition := 1;
+		doStripperRetract := FALSE;
+	30: // error state
+		MoveToLoadPosition := -1;	
+		doStripperRetract := FALSE;
+END_CASE
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="MoveToVacPosition" Id="{34d7a509-046c-4b80-b1e3-016fc696bbf1}">
+      <Declaration><![CDATA[METHOD MoveToVacPosition : BOOL
+VAR_INPUT
+	Execute	: BOOL;
+END_VAR
+VAR_INST
+	rTrig	: R_TRIG;
+	nIndex	: INT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[MoveToVacPosition := FALSE;
+
+rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	nIndex := 10;
+	VacAxis.AbsMove(Execute := FALSE, Position := 0, Velocity := 0);
+END_IF
+
+IF NOT Execute THEN
+	nIndex := 0;
+END_IF
+
+CASE nIndex OF
+	10: // move to location
+		IF VacAxis.AbsMove(Execute := TRUE, Position := _tubeParameters.VacPosition, Velocity := _parameters.vacuumVelocity) = 1 THEN
+			VacAxis.AbsMove(Execute := FALSE, Position := 0, Velocity := 0);
+			nIndex := 20;
+		END_IF
+	20: // 
+		MoveToVacPosition := TRUE;
+END_CASE]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="MoveXAbs" Id="{817fe306-2371-4ce8-933d-2b688f8df1c4}">
+      <Declaration><![CDATA[METHOD MoveXAbs : INT
+VAR_INPUT
+	Execute 	: BOOL;
+	Position	: LREAL;
+END_VAR
+VAR_INST
+	rTrig	: R_TRIG;
+	nIndex	: INT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	nIndex := 10;
+	mcMoveAbsX(Axis := Xaxis, Execute := FALSE);
+END_IF
+
+IF NOT Execute THEN
+	nIndex := 0;
+END_IF
+
+CASE nIndex OF 
+	0: // idle state
+		MoveXAbs := 0;
+	10: // move x axis
+		mcMoveAbsX.Execute := TRUE;
+		mcMoveAbsX.Position := Position;
+		mcMoveAbsX.Velocity := _parameters.velocityX;
+		IF mcMoveAbsX.Done THEN
+			mcMoveAbsX.Execute := FALSE;
+			nIndex := 20;
+		END_IF
+		IF mcMoveAbsx.Error THEN
+			mcMoveAbsX.Execute := FALSE;
+			nIndex := 30;
+		END_IF
+		mcMoveAbsX(Axis := Xaxis);
+	20: // done state
+		MoveXAbs := 1;
+	30: // error state
+		MoveXAbs := -1;
+END_CASE]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="MoveXRel" Id="{1c72477e-2926-49a7-a09f-136e8c2820e7}">
+      <Declaration><![CDATA[METHOD MoveXRel : INT
+VAR_INPUT
+	Execute 	: BOOL;
+	Distance	: LREAL;
+END_VAR
+VAR_INST
+	rTrig	: R_TRIG;
+	nIndex	: INT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	nIndex := 10;
+	mcMoveRelX(Axis := Xaxis, Execute := FALSE);
+END_IF
+
+IF NOT Execute THEN
+	nIndex := 0;
+END_IF
+
+CASE nIndex OF 
+	0: // idle state
+		MoveXRel := 0;
+	10: // move x axis
+		mcMoveRelX.Execute := TRUE;
+		mcMoveRelX.Distance := Distance;
+		mcMoveRelX.Velocity := _parameters.velocityX;
+		IF mcMoveRelX.Done THEN
+			mcMoveRelX.Execute := FALSE;
+			nIndex := 20;
+		END_IF
+		IF mcMoveRelX.Error THEN
+			mcMoveRelX.Execute := FALSE;
+			nIndex := 30;
+		END_IF
+		mcMoveRelX(Axis := Xaxis);
+	20: // done state
+		MoveXRel := 1;
+	30: // error state
+		MoveXRel := -1;
+END_CASE]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="MoveYAbs" Id="{79d632b5-f66a-40cc-b30d-cfeb953b54e2}">
+      <Declaration><![CDATA[METHOD MoveYAbs : INT
+VAR_INPUT
+	Execute		: BOOL;
+	Position	: LREAL;
+END_VAR
+
+VAR_INST
+	rTrig		: R_TRIG;
+	nIndex		: INT;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	nIndex := 10;
+	mcMoveAbsY(Axis := Yaxis, Execute := FALSE);
+END_IF
+
+IF NOT Execute THEN
+	nIndex := 0;
+END_IF
+
+CASE nIndex OF 
+	0: // idle state
+		MoveYAbs := 0;
+	10: // move x axis
+		mcMoveAbsY.Execute := TRUE;
+		mcMoveAbsY.Position := Position;
+		mcMoveAbsY.Velocity := _parameters.velocityY;
+		IF mcMoveAbsY.Done THEN
+			mcMoveAbsY.Execute := FALSE;
+			nIndex := 20;
+		END_IF
+		IF mcMoveAbsY.Error THEN
+			mcMoveAbsY.Execute := FALSE;
+			nIndex := 30;
+		END_IF
+		mcMoveAbsY(Axis := Yaxis);
+	20: // done state
+		MoveYAbs := 1;
+	30: // error state
+		MoveYAbs := -1;
+END_CASE]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="MoveYRel" Id="{84ffaa1a-1ddb-4724-ab2e-15271e721c6f}">
+      <Declaration><![CDATA[METHOD MoveYRel : INT
+VAR_INPUT
+	Execute 	: BOOL;
+	Distance	: LREAL;
+END_VAR
+VAR_INST
+	rTrig	: R_TRIG;
+	nIndex	: INT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	nIndex := 10;
+	mcMoveRelY(Axis := Yaxis, Execute := FALSE);
+END_IF
+
+IF NOT Execute THEN
+	nIndex := 0;
+END_IF
+
+CASE nIndex OF 
+	0: // idle state
+		MoveYRel := 0;
+	10: // move x axis
+		mcMoveRelY.Execute := TRUE;
+		mcMoveRelY.Distance := Distance;
+		mcMoveRelY.Velocity := _parameters.velocityY;
+		IF mcMoveRelY.Done THEN
+			mcMoveRelY.Execute := FALSE;
+			nIndex := 20;
+		END_IF
+		IF mcMoveRelY.Error THEN
+			mcMoveRelY.Execute := FALSE;
+			nIndex := 30;
+		END_IF
+		mcMoveRelY(Axis := Yaxis);
+	20: // done state
+		MoveYRel := 1;
+	30: // error state
+		MoveYRel := -1;
+END_CASE]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="OperationalSpindle" Id="{68a1f7e9-43b5-4daf-8a2f-3b23a2ebfe2b}">
+      <Declaration><![CDATA[PROPERTY OperationalSpindle : BOOL]]></Declaration>
+      <Get Name="Get" Id="{dc6e9951-601a-42eb-b880-32c7c176bd62}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[Spindle.ReadStatus();
+OperationalSpindle := Spindle.Status.Operational;]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="OperationalX" Id="{90c192e8-baec-44b6-948f-a5490918a8af}">
+      <Declaration><![CDATA[PROPERTY OperationalX : BOOL]]></Declaration>
+      <Get Name="Get" Id="{e47ffcbf-8a49-4f23-a413-41d12f85cd78}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[XAxis.ReadStatus();
+OperationalX := XAxis.Status.Operational;]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="OperationalY" Id="{66fc0810-403d-4a71-80fd-4ca31c059050}">
+      <Declaration><![CDATA[PROPERTY OperationalY : BOOL]]></Declaration>
+      <Get Name="Get" Id="{496981a5-dcc0-4a69-8020-083234efdcaa}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[YAxis.ReadStatus();
+OperationalY := YAxis.Status.Operational;]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="Parameters" Id="{7862d6ae-0e42-4132-b98d-9bab13d210b3}" FolderPath="Parameters\">
+      <Declaration><![CDATA[PROPERTY Parameters : ST_MandrelParameters]]></Declaration>
+      <Get Name="Get" Id="{4282e743-d937-43c3-b1ea-ff933a1277cb}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[Parameters := _parameters;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{ccfd65a9-2fd1-4ff2-9c71-f6ca9fb610b3}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[fbMessageLoaded.Send(0);
+_parameters := Parameters;
+_hmiParameters := Parameters;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Method Name="Reset" Id="{d21fc356-7e79-45ff-975a-a2fd653410ed}">
+      <Declaration><![CDATA[METHOD Reset : INT
+VAR_INPUT
+	Execute	: BOOL;
+END_VAR
+VAR_INST
+	nIndex 	: INT;
+	rTrig	: R_TRIG;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	nIndex := 10;
+	LiftSampleTon(IN := FALSE);
+	LowerSampleTon(IN := FALSE);
+	VacAxis.Reset(Execute := FALSE);
+END_IF
+
+IF NOT Execute THEN
+	nIndex := 0;
+END_IF
+
+Xaxis.ReadStatus();
+YAxis.ReadStatus();
+Spindle.ReadStatus();
+
+CASE nIndex OF
+	0:// idle state
+		Reset := 0;
+	10: // check if there are any errors on the drives
+		IF XAxis.Status.Error THEN
+			nIndex := 20;
+		ELSIF YAxis.Status.Error THEN
+			nIndex := 30;
+		ELSIF Spindle.Status.Error THEN
+			nIndex := 40;
+		ELSIF VacAxis.Error THEN
+			nIndex := 45;
+		ELSE
+			nIndex := 50;
+		END_IF
+	20: // reset x axis
+		mcResetX.Execute := TRUE;
+		IF mcResetX.Done THEN
+			nIndex := 10;
+			mcResetX.Execute := FALSE;
+		END_IF
+		mcResetX(Axis := XAxis);
+	30: // reset y axis
+		mcResetY.Execute := TRUE;
+		IF mcResetY.Done THEN
+			nIndex := 10;
+			mcResetY.Execute := FALSE;
+		END_IF
+		mcResetY(Axis := YAxis);
+	40: // reset spindle axis
+		mcResetSpindle.Execute := TRUE;
+		IF mcResetSpindle.Done THEN
+			nIndex := 10;
+			mcResetSpindle.Execute := FALSE;
+		END_IF
+		mcResetSpindle(Axis := Spindle);
+	45: // reset the vac axis
+		
+		IF VacAxis.Reset(Execute := TRUE) THEN
+			VacAxis.Reset(Execute := FALSE);
+			nIndex := 10;
+		END_IF
+		
+	50: // enable the drives
+		mcPowerX(Axis := XAxis, Enable := TRUE, Enable_Negative := TRUE, Enable_Positive := TRUE);
+		mcPowerY(Axis := YAxis, Enable := TRUE, Enable_Negative := TRUE, Enable_Positive := TRUE);
+		mcPowerSpindle(Axis := Spindle, Enable := TRUE, Enable_Negative := TRUE, Enable_Positive := TRUE);
+		IF XAxis.Status.Operational 
+			AND YAxis.Status.Operational 
+			AND Spindle.Status.Operational 
+			AND VacAxis.Enable() THEN
+				nIndex := 60;
+		END_IF
+	60: // done state
+		Reset := 1;			
+END_CASE]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="RotateSpindle" Id="{e80d9d9c-0347-4f7b-a767-0261ec2dc4c3}">
+      <Declaration><![CDATA[METHOD RotateSpindle : INT
+VAR_INPUT
+	Execute : BOOL;
+	Distance	: LREAL;
+END_VAR
+VAR_INST
+	nIndex : INT;
+	rTrig	: R_TRIG;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	nIndex := 10;
+	mcMoveRelSpindle(Axis := Spindle, Execute := FALSE);
+END_IF
+
+IF NOT Execute THEN
+	nIndex := 0;
+END_IF
+
+CASE nIndex OF
+	0: // idle state
+		RotateSpindle := 0;
+	10: // move relative
+		mcMoveRelSpindle.Execute := TRUE;
+		mcMoveRelSpindle.Distance := Distance;
+		mcMoveRelSpindle.Velocity := _parameters.spindleVelocity;
+		IF mcMoveRelSpindle.Done THEN
+			mcMoveRelSpindle.Execute := FALSE;
+			nIndex := 20;
+		END_IF
+		IF mcMoveRelSpindle.Error THEN
+			mcMoveRelSpindle.Execute := FALSE;
+			nIndex := 30;
+		END_IF
+		mcMoveRelSpindle(Axis := Spindle);
+	20: // done state
+		RotateSpindle := 1;
+	30: // error state
+		RotateSpindle := -1;
+END_CASE
+
+]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="SpindleIncrement" Id="{69127a3b-8a39-408a-bc10-b617e6fcb5a1}">
+      <Declaration><![CDATA[PROPERTY SpindleIncrement : LREAL]]></Declaration>
+      <Get Name="Get" Id="{6adfb2de-1421-4ec0-b250-93bfa8b47db3}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[SpindleIncrement := _spindleIncrement;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{0f1bd094-c973-41ee-ad95-4cc2e46d3962}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[_SpindleIncrement := SpindleIncrement;
+]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="SpindleOffset" Id="{b278a141-bb43-4a72-b4b0-4b956fb87e42}" FolderPath="Parameters\">
+      <Declaration><![CDATA[PROPERTY SpindleOffset : LREAL]]></Declaration>
+      <Get Name="Get" Id="{ea1f3fb3-32bf-40a4-9a2b-12ea48ce968a}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[SpindleOffset := _parameters.spindleOffset;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{adc84e26-825a-47aa-ba5f-1c2805fe65f8}">
+        <Declaration><![CDATA[
+VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[fbMessageChange.ipArguments.Clear().AddString('SpindleOffset').AddLReal(_parameters.spindleOffset).AddLReal(SpindleOffset);
+fbMessageChange.Send(0);
+_parameters.spindleOffset := SpindleOffset;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="spindleVelocity" Id="{d16217c0-7b71-4d50-98db-fc8ef8497b09}" FolderPath="Parameters\">
+      <Declaration><![CDATA[PROPERTY spindleVelocity : LREAL]]></Declaration>
+      <Get Name="Get" Id="{56ca16ee-774f-490e-8094-1c7d186c3ea4}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[spindleVelocity := _parameters.spindleVelocity;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{5c1b9ef0-dc93-4817-a56a-c5d5f5fc8f5b}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[fbMessageChange.ipArguments.Clear().AddString('spindleVelocity').AddLReal(_parameters.spindleVelocity).AddLReal(spindleVelocity);
+fbMessageChange.Send(0);
+_parameters.spindleVelocity := spindleVelocity;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="TubeParameters" Id="{5b8aea3b-2737-435a-867b-000553e0d427}">
+      <Declaration><![CDATA[PROPERTY TubeParameters : ST_TubeParameters]]></Declaration>
+      <Get Name="Get" Id="{69548ff3-e596-4ee7-ac05-9b519f23a44a}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[TubeParameters := _tubeParameters;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{154425ad-0ba9-4949-bbf4-21b8b41c8fe6}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[_tubeParameters := TubeParameters;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="VacuumSensor" Id="{5ab5a27a-9f3a-4e88-8e4f-47b7f15e457b}">
+      <Declaration><![CDATA[PROPERTY VacuumSensor : REAL]]></Declaration>
+      <Get Name="Get" Id="{4f514a50-93f7-424c-8a3e-882ff9d1dc0d}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[VacuumSensor := _vacuum_mmHg;]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="VacuumVelocity" Id="{9d23765f-a068-4976-b8b5-10ac00b13cb9}" FolderPath="Parameters\">
+      <Declaration><![CDATA[PROPERTY VacuumVelocity : LREAL]]></Declaration>
+      <Get Name="Get" Id="{364ef444-7677-4769-ab38-939d4a824cfe}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[VacuumVelocity := _parameters.vacuumVelocity;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{a4bb047d-bf79-458b-a01d-4d9832a184e7}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[fbMessageChange.ipArguments.Clear().AddString('VacuumVelocity').AddLReal(_parameters.vacuumVelocity).AddLReal(VacuumVelocity);
+fbMessageChange.Send(0);
+_parameters.vacuumVelocity := VacuumVelocity;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="velocityX" Id="{c84cec25-4047-470d-a5c7-d2d052514f8a}" FolderPath="Parameters\">
+      <Declaration><![CDATA[PROPERTY velocityX : LREAL]]></Declaration>
+      <Get Name="Get" Id="{6185d455-d673-4b5a-9257-5fb11d9506cc}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[velocityX := _parameters.velocityX;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{988824f2-e512-46c4-9bd3-d41a6fbc6a4b}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[fbMessageChange.ipArguments.Clear().AddString('velocityX').AddLReal(_parameters.velocityX).AddLReal(velocityX);
+fbMessageChange.Send(0);
+_parameters.velocityX := velocityX;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="velocityY" Id="{82adb88e-cb8e-4bf5-9c8b-b4ab49464c8d}" FolderPath="Parameters\">
+      <Declaration><![CDATA[PROPERTY velocityY : LREAL]]></Declaration>
+      <Get Name="Get" Id="{92622745-2354-46d7-84f3-20392dec8be2}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[velocityY := _parameters.velocityY;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{3d09ec07-091f-4080-b6ba-fa370af14e81}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[fbMessageChange.ipArguments.Clear().AddString('velocityY').AddLReal(_parameters.velocityY).AddLReal(velocityY);
+fbMessageChange.Send(0);
+_parameters.velocityY := velocityY;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <LineIds Name="FB_Mandrel">
+      <LineId Id="9" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.Abort">
+      <LineId Id="5" Count="2" />
+      <LineId Id="16" Count="0" />
+      <LineId Id="8" Count="0" />
+      <LineId Id="12" Count="0" />
+      <LineId Id="10" Count="1" />
+      <LineId Id="9" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.Clear">
+      <LineId Id="5" Count="0" />
+      <LineId Id="10" Count="1" />
+      <LineId Id="32" Count="1" />
+      <LineId Id="53" Count="0" />
+      <LineId Id="12" Count="0" />
+      <LineId Id="14" Count="0" />
+      <LineId Id="13" Count="0" />
+      <LineId Id="15" Count="1" />
+      <LineId Id="18" Count="0" />
+      <LineId Id="17" Count="0" />
+      <LineId Id="19" Count="0" />
+      <LineId Id="21" Count="3" />
+      <LineId Id="26" Count="0" />
+      <LineId Id="25" Count="0" />
+      <LineId Id="27" Count="4" />
+      <LineId Id="34" Count="2" />
+      <LineId Id="38" Count="0" />
+      <LineId Id="48" Count="2" />
+      <LineId Id="52" Count="0" />
+      <LineId Id="51" Count="0" />
+      <LineId Id="39" Count="1" />
+      <LineId Id="20" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.ConvertVaccum">
+      <LineId Id="5" Count="0" />
+      <LineId Id="9" Count="0" />
+      <LineId Id="11" Count="0" />
+      <LineId Id="10" Count="0" />
+      <LineId Id="15" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.DisableSpindle">
+      <LineId Id="5" Count="0" />
+      <LineId Id="7" Count="1" />
+      <LineId Id="6" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.DisableX">
+      <LineId Id="5" Count="2" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.DisableY">
+      <LineId Id="5" Count="2" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.EnableSpindle">
+      <LineId Id="6" Count="6" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.EnableX">
+      <LineId Id="6" Count="4" />
+      <LineId Id="5" Count="0" />
+      <LineId Id="11" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.EnableY">
+      <LineId Id="6" Count="6" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.FB_init">
+      <LineId Id="8" Count="7" />
+      <LineId Id="7" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.LiftSample">
+      <LineId Id="24" Count="0" />
+      <LineId Id="30" Count="0" />
+      <LineId Id="25" Count="4" />
+      <LineId Id="17" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.loadPositionX.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.loadPositionX.Set">
+      <LineId Id="5" Count="1" />
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.loadPositionY.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.loadPositionY.Set">
+      <LineId Id="5" Count="1" />
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.LowerSample">
+      <LineId Id="5" Count="0" />
+      <LineId Id="15" Count="0" />
+      <LineId Id="14" Count="0" />
+      <LineId Id="9" Count="2" />
+      <LineId Id="13" Count="0" />
+      <LineId Id="19" Count="0" />
+      <LineId Id="12" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.MandrelVacuum.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.MandrelVacuum.Set">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.MonitorParameters">
+      <LineId Id="5" Count="2" />
+      <LineId Id="9" Count="0" />
+      <LineId Id="8" Count="0" />
+      <LineId Id="10" Count="1" />
+      <LineId Id="13" Count="0" />
+      <LineId Id="12" Count="0" />
+      <LineId Id="14" Count="1" />
+      <LineId Id="17" Count="0" />
+      <LineId Id="16" Count="0" />
+      <LineId Id="18" Count="1" />
+      <LineId Id="21" Count="0" />
+      <LineId Id="20" Count="0" />
+      <LineId Id="22" Count="1" />
+      <LineId Id="25" Count="0" />
+      <LineId Id="24" Count="0" />
+      <LineId Id="26" Count="1" />
+      <LineId Id="32" Count="0" />
+      <LineId Id="31" Count="0" />
+      <LineId Id="33" Count="1" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.MoveToCutPosition">
+      <LineId Id="40" Count="0" />
+      <LineId Id="42" Count="1" />
+      <LineId Id="56" Count="0" />
+      <LineId Id="81" Count="0" />
+      <LineId Id="105" Count="0" />
+      <LineId Id="57" Count="0" />
+      <LineId Id="44" Count="0" />
+      <LineId Id="50" Count="0" />
+      <LineId Id="49" Count="0" />
+      <LineId Id="51" Count="1" />
+      <LineId Id="46" Count="0" />
+      <LineId Id="45" Count="0" />
+      <LineId Id="47" Count="0" />
+      <LineId Id="53" Count="2" />
+      <LineId Id="58" Count="1" />
+      <LineId Id="83" Count="1" />
+      <LineId Id="86" Count="1" />
+      <LineId Id="99" Count="3" />
+      <LineId Id="85" Count="0" />
+      <LineId Id="60" Count="1" />
+      <LineId Id="88" Count="0" />
+      <LineId Id="103" Count="0" />
+      <LineId Id="63" Count="0" />
+      <LineId Id="62" Count="0" />
+      <LineId Id="64" Count="0" />
+      <LineId Id="82" Count="0" />
+      <LineId Id="104" Count="0" />
+      <LineId Id="65" Count="2" />
+      <LineId Id="72" Count="0" />
+      <LineId Id="48" Count="0" />
+      <LineId Id="9" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.MoveToEjectPosition">
+      <LineId Id="9" Count="3" />
+      <LineId Id="48" Count="0" />
+      <LineId Id="13" Count="12" />
+      <LineId Id="49" Count="1" />
+      <LineId Id="52" Count="1" />
+      <LineId Id="51" Count="0" />
+      <LineId Id="26" Count="1" />
+      <LineId Id="54" Count="0" />
+      <LineId Id="28" Count="6" />
+      <LineId Id="55" Count="0" />
+      <LineId Id="35" Count="4" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.MoveToInspectPosition">
+      <LineId Id="5" Count="0" />
+      <LineId Id="17" Count="1" />
+      <LineId Id="48" Count="0" />
+      <LineId Id="57" Count="0" />
+      <LineId Id="80" Count="0" />
+      <LineId Id="19" Count="0" />
+      <LineId Id="21" Count="0" />
+      <LineId Id="20" Count="0" />
+      <LineId Id="22" Count="1" />
+      <LineId Id="25" Count="0" />
+      <LineId Id="24" Count="0" />
+      <LineId Id="26" Count="0" />
+      <LineId Id="28" Count="0" />
+      <LineId Id="30" Count="0" />
+      <LineId Id="75" Count="3" />
+      <LineId Id="31" Count="2" />
+      <LineId Id="58" Count="1" />
+      <LineId Id="61" Count="1" />
+      <LineId Id="60" Count="0" />
+      <LineId Id="34" Count="1" />
+      <LineId Id="63" Count="0" />
+      <LineId Id="79" Count="0" />
+      <LineId Id="36" Count="6" />
+      <LineId Id="64" Count="0" />
+      <LineId Id="81" Count="0" />
+      <LineId Id="43" Count="4" />
+      <LineId Id="27" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.MoveToLoadPosition">
+      <LineId Id="9" Count="3" />
+      <LineId Id="48" Count="0" />
+      <LineId Id="13" Count="2" />
+      <LineId Id="65" Count="0" />
+      <LineId Id="16" Count="9" />
+      <LineId Id="49" Count="1" />
+      <LineId Id="52" Count="1" />
+      <LineId Id="51" Count="0" />
+      <LineId Id="26" Count="1" />
+      <LineId Id="54" Count="0" />
+      <LineId Id="28" Count="6" />
+      <LineId Id="55" Count="0" />
+      <LineId Id="35" Count="1" />
+      <LineId Id="75" Count="0" />
+      <LineId Id="37" Count="1" />
+      <LineId Id="76" Count="0" />
+      <LineId Id="39" Count="0" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.MoveToVacPosition">
+      <LineId Id="5" Count="0" />
+      <LineId Id="12" Count="0" />
+      <LineId Id="11" Count="0" />
+      <LineId Id="13" Count="1" />
+      <LineId Id="16" Count="0" />
+      <LineId Id="15" Count="0" />
+      <LineId Id="28" Count="0" />
+      <LineId Id="27" Count="0" />
+      <LineId Id="29" Count="1" />
+      <LineId Id="18" Count="0" />
+      <LineId Id="17" Count="0" />
+      <LineId Id="19" Count="0" />
+      <LineId Id="21" Count="1" />
+      <LineId Id="24" Count="0" />
+      <LineId Id="23" Count="0" />
+      <LineId Id="25" Count="1" />
+      <LineId Id="20" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.MoveXAbs">
+      <LineId Id="5" Count="0" />
+      <LineId Id="11" Count="1" />
+      <LineId Id="24" Count="0" />
+      <LineId Id="13" Count="0" />
+      <LineId Id="15" Count="0" />
+      <LineId Id="14" Count="0" />
+      <LineId Id="16" Count="1" />
+      <LineId Id="19" Count="0" />
+      <LineId Id="18" Count="0" />
+      <LineId Id="20" Count="0" />
+      <LineId Id="22" Count="1" />
+      <LineId Id="25" Count="4" />
+      <LineId Id="31" Count="0" />
+      <LineId Id="30" Count="0" />
+      <LineId Id="34" Count="1" />
+      <LineId Id="37" Count="0" />
+      <LineId Id="36" Count="0" />
+      <LineId Id="32" Count="1" />
+      <LineId Id="38" Count="2" />
+      <LineId Id="21" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.MoveXRel">
+      <LineId Id="14" Count="29" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.MoveYAbs">
+      <LineId Id="6" Count="29" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.MoveYRel">
+      <LineId Id="14" Count="29" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.OperationalSpindle.Get">
+      <LineId Id="2" Count="0" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.OperationalX.Get">
+      <LineId Id="2" Count="0" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.OperationalY.Get">
+      <LineId Id="5" Count="0" />
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.Parameters.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.Parameters.Set">
+      <LineId Id="6" Count="0" />
+      <LineId Id="2" Count="0" />
+      <LineId Id="7" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.Reset">
+      <LineId Id="5" Count="0" />
+      <LineId Id="14" Count="1" />
+      <LineId Id="79" Count="1" />
+      <LineId Id="96" Count="0" />
+      <LineId Id="16" Count="0" />
+      <LineId Id="18" Count="0" />
+      <LineId Id="17" Count="0" />
+      <LineId Id="19" Count="1" />
+      <LineId Id="28" Count="0" />
+      <LineId Id="27" Count="0" />
+      <LineId Id="29" Count="1" />
+      <LineId Id="22" Count="0" />
+      <LineId Id="21" Count="0" />
+      <LineId Id="23" Count="0" />
+      <LineId Id="25" Count="1" />
+      <LineId Id="31" Count="1" />
+      <LineId Id="34" Count="3" />
+      <LineId Id="89" Count="1" />
+      <LineId Id="38" Count="1" />
+      <LineId Id="33" Count="0" />
+      <LineId Id="40" Count="0" />
+      <LineId Id="44" Count="2" />
+      <LineId Id="48" Count="0" />
+      <LineId Id="47" Count="0" />
+      <LineId Id="49" Count="0" />
+      <LineId Id="41" Count="0" />
+      <LineId Id="50" Count="2" />
+      <LineId Id="54" Count="0" />
+      <LineId Id="53" Count="0" />
+      <LineId Id="55" Count="0" />
+      <LineId Id="42" Count="0" />
+      <LineId Id="56" Count="2" />
+      <LineId Id="60" Count="0" />
+      <LineId Id="59" Count="0" />
+      <LineId Id="61" Count="0" />
+      <LineId Id="91" Count="0" />
+      <LineId Id="108" Count="0" />
+      <LineId Id="92" Count="1" />
+      <LineId Id="95" Count="0" />
+      <LineId Id="94" Count="0" />
+      <LineId Id="109" Count="0" />
+      <LineId Id="43" Count="0" />
+      <LineId Id="62" Count="0" />
+      <LineId Id="64" Count="0" />
+      <LineId Id="66" Count="1" />
+      <LineId Id="97" Count="2" />
+      <LineId Id="68" Count="1" />
+      <LineId Id="65" Count="0" />
+      <LineId Id="70" Count="0" />
+      <LineId Id="24" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.RotateSpindle">
+      <LineId Id="42" Count="2" />
+      <LineId Id="57" Count="0" />
+      <LineId Id="45" Count="8" />
+      <LineId Id="58" Count="5" />
+      <LineId Id="65" Count="0" />
+      <LineId Id="64" Count="0" />
+      <LineId Id="66" Count="1" />
+      <LineId Id="69" Count="0" />
+      <LineId Id="68" Count="0" />
+      <LineId Id="70" Count="1" />
+      <LineId Id="54" Count="0" />
+      <LineId Id="72" Count="1" />
+      <LineId Id="55" Count="1" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.SpindleIncrement.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.SpindleIncrement.Set">
+      <LineId Id="2" Count="0" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.SpindleOffset.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.SpindleOffset.Set">
+      <LineId Id="6" Count="1" />
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.spindleVelocity.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.spindleVelocity.Set">
+      <LineId Id="5" Count="1" />
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.TubeParameters.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.TubeParameters.Set">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.VacuumSensor.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.VacuumVelocity.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.VacuumVelocity.Set">
+      <LineId Id="5" Count="1" />
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.velocityX.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.velocityX.Set">
+      <LineId Id="5" Count="1" />
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.velocityY.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Mandrel.velocityY.Set">
+      <LineId Id="5" Count="1" />
+      <LineId Id="2" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

@@ -1,0 +1,19 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.3">
+  <DUT Name="ST_CameraResults" Id="{7ab6863f-0e00-47d5-b47d-eb8b8f5e06c7}">
+    <Declaration><![CDATA[TYPE ST_CameraResults :
+STRUCT
+	Count				: REAL;
+	WidthMeasurement	: REAL;
+	HeightMeasurement	: REAL;
+	LocationInX			: REAL;
+	LocationInY			: REAL;
+	PatternMatchRow		: REAL;
+	PatternMatchColumn 	: REAL;
+	PointValueRow		: ARRAY[1..GVL.NumberVisionPoints] OF REAL;
+	PointValueColumn	: ARRAY[1..GVL.NumberVisionPoints] OF REAL;
+END_STRUCT
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

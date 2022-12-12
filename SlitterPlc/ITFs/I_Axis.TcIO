@@ -1,0 +1,78 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.3">
+  <Itf Name="I_Axis" Id="{ff09e106-efc0-480f-a810-b0e69545b92d}">
+    <Declaration><![CDATA[INTERFACE I_Axis
+]]></Declaration>
+    <Property Name="ErrorCode" Id="{18d02768-3894-4b48-8730-979f48e377f0}">
+      <Declaration><![CDATA[PROPERTY ErrorCode : UDINT]]></Declaration>
+      <Get Name="Get" Id="{d926dade-b511-4b90-892e-50723dce51dd}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+    </Property>
+    <Method Name="Home" Id="{55f8d6f0-8d97-470d-854a-c148685ec835}">
+      <Declaration><![CDATA[METHOD Home : INT
+VAR_INPUT
+	Execute	: BOOL;
+END_VAR
+]]></Declaration>
+    </Method>
+    <Method Name="MoveAbs" Id="{8a1736c0-39a5-4ca4-9f5d-3542aef7b888}">
+      <Declaration><![CDATA[METHOD MoveAbs : INT
+VAR_INPUT
+	Execute	: BOOL;
+END_VAR
+]]></Declaration>
+    </Method>
+    <Method Name="MoveRel" Id="{19df232c-0f7a-4573-ba2c-f4ae728d4c70}">
+      <Declaration><![CDATA[METHOD MoveRel : INT
+VAR_INPUT
+	Execute	: BOOL;
+END_VAR
+]]></Declaration>
+    </Method>
+    <Property Name="NcToPlc" Id="{f2cf6733-c6b6-400d-a841-18693170e938}">
+      <Declaration><![CDATA[PROPERTY NcToPlc : NCTOPLC_AXIS_REF]]></Declaration>
+      <Get Name="Get" Id="{ef121437-e3b6-48b3-93e0-f69cfa5908d9}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+    </Property>
+    <Method Name="Power" Id="{34c8b60e-37c6-4750-9039-7660bbb43870}">
+      <Declaration><![CDATA[METHOD Power : BOOL
+VAR_INPUT
+	Enable	: BOOL;
+END_VAR
+]]></Declaration>
+    </Method>
+    <Method Name="Reset" Id="{3e2ac4b1-ad3d-47f0-b3bc-82d79b2a8e75}">
+      <Declaration><![CDATA[METHOD Reset : INT
+VAR_INPUT
+	Execute	: BOOL;
+END_VAR
+]]></Declaration>
+    </Method>
+    <Property Name="SetDistance" Id="{450a042c-6b1c-4d58-b289-e2a7ad316dda}">
+      <Declaration><![CDATA[PROPERTY SetDistance : LREAL]]></Declaration>
+      <Set Name="Set" Id="{69cd87a4-a072-46ef-8c2d-5b215bebbe69}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Set>
+    </Property>
+    <Property Name="SetPosition" Id="{a6d0fc83-abd3-4c7c-9c0f-9eafbc276fe5}">
+      <Declaration><![CDATA[PROPERTY SetPosition : LREAL]]></Declaration>
+      <Set Name="Set" Id="{0ff8fa65-dbf1-40bb-bd6b-bddd72d6c958}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Set>
+    </Property>
+    <Property Name="SetVelocity" Id="{df19db6a-663f-432f-9eef-48e6c7427eba}">
+      <Declaration><![CDATA[PROPERTY SetVelocity : LREAL]]></Declaration>
+      <Set Name="Set" Id="{5a950007-95e4-4d57-9e8d-f4e9238d794d}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Set>
+    </Property>
+    <Property Name="Status" Id="{6e65ed05-cfc8-460a-b58d-4978eadac25c}">
+      <Declaration><![CDATA[PROPERTY Status : ST_AxisStatus]]></Declaration>
+      <Get Name="Get" Id="{e7b39dac-9d55-49e3-bead-65335fd29464}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+    </Property>
+  </Itf>
+</TcPlcObject>

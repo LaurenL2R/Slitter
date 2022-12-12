@@ -1,0 +1,52 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.3">
+  <Itf Name="I_Frame" Id="{8ca5ae50-405d-4929-9a0c-ad0b082ac295}">
+    <Declaration><![CDATA[INTERFACE I_Frame
+]]></Declaration>
+    <Method Name="BlinkGreen" Id="{8b15ce8f-5bd2-48ba-8585-9a8d7f0efc10}">
+      <Declaration><![CDATA[METHOD BlinkGreen : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+    </Method>
+    <Property Name="ControlLeft" Id="{e729e85a-80b6-4adc-8c85-644b890d8f09}">
+      <Declaration><![CDATA[PROPERTY ControlLeft : BOOL]]></Declaration>
+      <Get Name="Get" Id="{a2373876-6400-4a3a-8ee9-c9c66b103bba}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+    </Property>
+    <Property Name="ControlRight" Id="{c65635c4-bc85-4e2d-af33-c7c65dd1d083}">
+      <Declaration><![CDATA[PROPERTY ControlRight : BOOL]]></Declaration>
+      <Get Name="Get" Id="{d53d5e6b-04a4-47a2-8d8e-ad7cb1004761}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+    </Property>
+    <Property Name="Door1" Id="{84c18a27-147d-4b73-9d3a-99ef2ade8586}">
+      <Declaration><![CDATA[PROPERTY Door1 : BOOL]]></Declaration>
+      <Get Name="Get" Id="{dc3bd17a-6f81-4d0a-85af-8cab427feec1}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+    </Property>
+    <Property Name="Door2" Id="{e872f46b-db9c-4669-89bc-4c41e1be477d}">
+      <Declaration><![CDATA[PROPERTY Door2 : BOOL]]></Declaration>
+      <Get Name="Get" Id="{c90eea63-5803-49f8-9b39-9e2af68c6f2c}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+    </Property>
+    <Property Name="Door3" Id="{6bd68c1e-2f1c-4655-940e-5ab0e7c0e7c6}">
+      <Declaration><![CDATA[PROPERTY Door3 : BOOL]]></Declaration>
+      <Get Name="Get" Id="{eca6e6bc-3aaf-42f7-9f8c-8194ad116d89}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+    </Property>
+    <Property Name="GreenLight" Id="{f606bc7a-66db-4f7f-a9d9-b435c4bda508}">
+      <Declaration><![CDATA[PROPERTY GreenLight : BOOL]]></Declaration>
+      <Get Name="Get" Id="{80539be2-cdb9-44cf-9ad7-85733403b2e6}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+      <Set Name="Set" Id="{459631e6-7b6f-4af0-8dcd-3b1bf86ed2d1}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Set>
+    </Property>
+  </Itf>
+</TcPlcObject>

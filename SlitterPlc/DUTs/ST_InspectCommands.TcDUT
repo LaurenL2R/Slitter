@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.3">
+  <DUT Name="ST_InspectCommands" Id="{6f0648fb-a5d5-44e3-889b-8bd578108dec}">
+    <Declaration><![CDATA[TYPE ST_InspectCommands :
+STRUCT
+	IncrementSpindle 	: BOOL;
+	DecrementSpindle	: BOOL;
+	Inspect				: BOOL;	
+	InspectComplete		: BOOL;
+END_STRUCT
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

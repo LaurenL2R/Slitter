@@ -1,0 +1,46 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.3">
+  <Itf Name="I_Actuator" Id="{c342f9f1-764e-4d53-a585-525bf1d8f6af}">
+    <Declaration><![CDATA[INTERFACE I_Actuator
+]]></Declaration>
+    <Property Name="Error" Id="{ae1c1b38-bb54-4fcd-896c-318090aa16bd}">
+      <Declaration><![CDATA[PROPERTY Error : BOOL]]></Declaration>
+      <Get Name="Get" Id="{fe9dfc56-54d9-445b-8981-1aac1eab7cdf}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+      <Set Name="Set" Id="{299c261e-fd05-4b1e-aa7a-8c3dd50995df}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Set>
+    </Property>
+    <Method Name="Extend" Id="{fe01184e-f33f-490b-88c7-8a0992fd030f}">
+      <Declaration><![CDATA[METHOD Extend : INT
+VAR_INPUT
+END_VAR
+]]></Declaration>
+    </Method>
+    <Property Name="IsExtended" Id="{3746d30a-0df3-4139-ab8b-f401fbd4e7ba}">
+      <Declaration><![CDATA[PROPERTY IsExtended : BOOL]]></Declaration>
+      <Get Name="Get" Id="{90852616-3bbe-4389-9f4a-2946c98999c6}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+    </Property>
+    <Property Name="IsRetracted" Id="{1484183f-bca6-4afc-aca9-209c90f220ed}">
+      <Declaration><![CDATA[PROPERTY IsRetracted : BOOL]]></Declaration>
+      <Get Name="Get" Id="{ba76253b-bf0f-426c-bd93-52fafd135728}">
+        <Declaration><![CDATA[]]></Declaration>
+      </Get>
+    </Property>
+    <Method Name="Neutral" Id="{1c4bd7b2-2f8f-480d-a985-db5121f0e07b}">
+      <Declaration><![CDATA[METHOD Neutral : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+    </Method>
+    <Method Name="Retract" Id="{d2ec8952-340a-48d4-a360-8bef3b23aaa6}">
+      <Declaration><![CDATA[METHOD Retract : INT
+VAR_INPUT
+END_VAR
+]]></Declaration>
+    </Method>
+  </Itf>
+</TcPlcObject>

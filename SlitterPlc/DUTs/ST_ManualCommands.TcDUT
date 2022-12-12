@@ -1,0 +1,53 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.9">
+  <DUT Name="ST_ManualCommands" Id="{cba4faf1-deff-4dea-a518-3c55fb87f1d3}">
+    <Declaration><![CDATA[TYPE ST_ManualCommands :
+STRUCT
+	bCalibrateMandrel		: BOOL;
+	bCameraCalibrate		: BOOL;
+	bCameraComputePeak		: BOOL;
+	bCameraTrigger			: BOOL;
+	bCameraInspect			: BOOL;
+	bCameraRawData			: BOOL;
+	bCameraSelectTube		: BOOL;
+	bCutSample				: BOOL;
+	bCutterDisable			: BOOL;
+	bCutterHome				: BOOL;
+	bCutterReset			: BOOL;
+	bCutterMoveAbs			: BOOL;
+	bEjectAxisEnableToggle	: BOOL;
+	bEjectAxisFailPosition	: BOOL;
+	bEjectAxisHomePosition	: BOOL;
+	bEjectAxisPassPosition	: BOOL;
+	bEjectAxisReset			: BOOL;
+	bEjectReset				: BOOL;
+	bEjectSamplePass		: BOOL;
+	bEjectSampleFail		: BOOL;
+	bEjectZExtend			: BOOL;
+	bEjectZNeutral			: BOOL;
+	bEjectZRetract			: BOOL;
+	bEjectBlowOff			: BOOL;
+	bEjectVacuum			: BOOL;
+	bEjectXOff				: BOOL;
+	bEjectZOff				: BOOL;
+	bLowerMandrel			: BOOL;		
+	bMandrelXEnableToggle	: BOOL;
+	bMandrelYEnableToggle	: BOOL;
+	bMandrelSpindleToggle	: BOOL;
+	bMandrelSpindleRotate	: BOOL;
+	bMandrelReset			: BOOL;
+	bMoveToLoadPosition		: BOOL;
+	bMoveToCutPosition		: BOOL;
+	bMoveToEjectPosition	: BOOL;
+	bMoveToInspectPosition	: BOOL;
+	bRaiseMandrel			: BOOL;
+	bSaveMandrelParameters	: BOOL;
+	bToggleMandrelVacuum	: BOOL;
+	bVacuumAxisToggleEnable	: BOOL;
+	bVacuumAxisMove			: BOOL;
+	bVacuumAxisReset		: BOOL;
+END_STRUCT
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

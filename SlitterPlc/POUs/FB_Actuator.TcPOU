@@ -1,0 +1,211 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.9">
+  <POU Name="FB_Actuator" Id="{857ac5c9-f12a-4ec3-ab61-971035c91f49}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Actuator IMPLEMENTS I_Actuator
+VAR_INPUT
+END_VAR
+VAR_OUTPUT
+END_VAR
+VAR
+	doValveExtend AT %Q*	: BOOL;
+	doValveRetract AT %Q*	: BOOL;
+	diRetracted AT %I*		: BOOL;
+	diExtended AT %I*		: BOOL;
+	ExtendTon				: TON := (PT := T#5S);
+	RetractTon				: TON := (PT := T#5S);
+	fbExtendAlarm			: FB_TcAlarm;
+	fbRetractAlarm			: FB_TcAlarm;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[]]></ST>
+    </Implementation>
+    <Property Name="Error" Id="{ec55e1c0-68f0-45f4-abfe-296dc5842a30}">
+      <Declaration><![CDATA[PROPERTY Error : BOOL]]></Declaration>
+      <Get Name="Get" Id="{0776e14e-e53f-4b46-858c-5b0950c917c4}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{2fee1fbc-8e09-450a-9794-4f5a34adbd41}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Method Name="Extend" Id="{857b4b7c-a2d9-4361-af63-b50945009eef}">
+      <Declaration><![CDATA[METHOD Extend : INT
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[Extend := 0;
+doValveExtend := TRUE;
+doValveRetract := FALSE;
+ExtendTon(IN := NOT diExtended);
+IF diExtended THEN
+	ExtendTon(IN := FALSE);
+	IF fbExtendAlarm.bRaised THEN
+		fbExtendAlarm.Clear(0, FALSE);
+	END_IF
+	Extend := 1;
+END_IF
+IF ExtendTon.Q THEN
+	ExtendTON(IN := FALSE);
+	fbExtendAlarm.Raise(0);
+	Extend := -1;
+END_IF
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="FB_init" Id="{d803e1fd-381b-411d-9c01-017ca78e6148}">
+      <Declaration><![CDATA[METHOD FB_init : BOOL
+VAR_INPUT
+	bInitRetains : BOOL; // if TRUE, the retain variables are initialized (warm start / cold start)
+	bInCopyCode : BOOL;  // if TRUE, the instance afterwards gets moved into the copy code (online change)
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF NOT fbExtendAlarm.EqualsToEventEntryEx(stOther := TC_EVENTS.SlitterEvents.ZActuatorExtendError) THEN
+	fbExtendAlarm.CreateEx(TC_EVENTS.SlitterEvents.ZActuatorExtendError, FALSE, 0);
+END_IF
+IF NOT fbRetractAlarm.EqualsToEventEntryEx(stOther := TC_EVENTS.SlitterEvents.ZActuatorRetractError) THEN
+	fbRetractAlarm.CreateEx(TC_EVENTS.SlitterEvents.ZActuatorRetractError, FALSE, 0);
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="IsExtended" Id="{3ecf1009-558a-476e-a119-1f70eca85299}">
+      <Declaration><![CDATA[PROPERTY IsExtended : BOOL]]></Declaration>
+      <Get Name="Get" Id="{238dc25c-d1de-4ba0-a529-793e2fe7a545}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[IsExtended := diExtended;]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="IsRetracted" Id="{445c5812-266f-4e32-98d0-158014a88419}">
+      <Declaration><![CDATA[PROPERTY IsRetracted : BOOL]]></Declaration>
+      <Get Name="Get" Id="{e66c6bb5-a345-4806-8914-f5d564d153d0}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[IsRetracted := diRetracted;]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Method Name="Neutral" Id="{30b3120a-4bee-44b3-9103-f4dc02b9c992}">
+      <Declaration><![CDATA[METHOD Neutral : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[doValveExtend := FALSE;
+doValveRetract := FALSE;
+Neutral := TRUE;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="Reset" Id="{3043bb29-efa2-4f3f-b085-076ab0c786a4}">
+      <Declaration><![CDATA[METHOD Reset : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF fbExtendAlarm.bRaised THEN
+	fbExtendAlarm.Clear(0, FALSE);
+END_IF
+IF fbRetractAlarm.bRaised THEN
+	fbRetractAlarm.Clear(0, FALSE);
+END_IF
+ExtendTon(IN := FALSE);
+RetractTon(IN := FALSE);]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="Retract" Id="{d45c1924-cbea-414e-9d60-745d4b4de82d}">
+      <Declaration><![CDATA[METHOD Retract : INT
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[Retract := 0;
+doValveExtend := FALSE;
+doValveRetract := TRUE;
+RetractTon(IN := NOT diRetracted);
+IF diRetracted THEN
+	RetractTon(IN := FALSE);
+	IF fbRetractAlarm.bRaised THEN
+		fbRetractAlarm.Clear(0, FALSE);
+	END_IF
+	Retract := 1;
+END_IF
+IF RetractTon.Q THEN
+	RetractTon(IN := FALSE);
+	fbRetractAlarm.Raise(0);
+	Retract := -1;
+END_IF
+]]></ST>
+      </Implementation>
+    </Method>
+    <LineIds Name="FB_Actuator">
+      <LineId Id="9" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Actuator.Error.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Actuator.Error.Set">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Actuator.Extend">
+      <LineId Id="5" Count="1" />
+      <LineId Id="18" Count="0" />
+      <LineId Id="26" Count="0" />
+      <LineId Id="7" Count="0" />
+      <LineId Id="27" Count="0" />
+      <LineId Id="23" Count="2" />
+      <LineId Id="8" Count="1" />
+      <LineId Id="12" Count="0" />
+      <LineId Id="28" Count="0" />
+      <LineId Id="22" Count="0" />
+      <LineId Id="13" Count="1" />
+      <LineId Id="10" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Actuator.FB_init">
+      <LineId Id="7" Count="5" />
+    </LineIds>
+    <LineIds Name="FB_Actuator.IsExtended.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Actuator.IsRetracted.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Actuator.Neutral">
+      <LineId Id="5" Count="1" />
+      <LineId Id="10" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Actuator.Reset">
+      <LineId Id="5" Count="7" />
+    </LineIds>
+    <LineIds Name="FB_Actuator.Retract">
+      <LineId Id="6" Count="1" />
+      <LineId Id="18" Count="0" />
+      <LineId Id="26" Count="0" />
+      <LineId Id="8" Count="0" />
+      <LineId Id="27" Count="0" />
+      <LineId Id="23" Count="2" />
+      <LineId Id="9" Count="1" />
+      <LineId Id="12" Count="0" />
+      <LineId Id="28" Count="0" />
+      <LineId Id="22" Count="0" />
+      <LineId Id="13" Count="1" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

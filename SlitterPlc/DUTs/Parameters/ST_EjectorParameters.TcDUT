@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.9">
+  <DUT Name="ST_EjectorParameters" Id="{4d391966-b6d6-4584-b4cc-e939f59249b6}">
+    <Declaration><![CDATA[TYPE ST_EjectorParameters :
+STRUCT
+	ejectPositionPass 	: LREAL; // := 100;
+	ejectPositionHome 	: LREAL; // := 50;
+	ejectPositionFail 	: LREAL; // := 0;
+	ejectVelocity		: LREAL; // := 20;
+END_STRUCT
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

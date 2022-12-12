@@ -1,0 +1,490 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.3">
+  <POU Name="FB_FourthOrder" Id="{43f3b3e2-d85a-4949-b935-5ad920f6c56e}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_FourthOrder
+VAR_INPUT
+END_VAR
+VAR_OUTPUT
+END_VAR
+VAR CONSTANT
+	order : INT := 4;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[]]></ST>
+    </Implementation>
+    <Method Name="Cofactor" Id="{141795b6-f13f-4227-8263-340a87fcd5da}">
+      <Declaration><![CDATA[METHOD Cofactor : BOOL
+VAR_INPUT
+	ptrMatrix5x5	: POINTER TO ARRAY[1..5,1..5] OF LREAL;
+	ptrCofactor		: POINTER TO LREAL;
+	row				: INT;
+	column			: INT;
+END_VAR
+VAR
+	Matrix4x4	: ARRAY[1..4,1..4] OF LREAL;	
+	i			: INT;
+	j			: INT;
+	k			: INT;
+	m			: INT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[k := 1;
+FOR i := 1 TO order+1 DO				// columns
+	m := 1;
+	IF i <> column THEN						
+		FOR j := 1 TO order+1 DO		
+			IF j <> row THEN
+				Matrix4x4[k,m] := ptrMatrix5x5^[i,j];
+				m := m + 1;
+			END_IF
+		END_FOR
+		k := k + 1;
+	END_IF
+END_FOR
+
+IF Determinant4x4(ptrDeterminant := ptrCofactor, ptrMatrix := ADR(Matrix4x4)) THEN
+	Cofactor := TRUE;
+ELSE
+	Cofactor := FALSE;
+END_IF
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="Determinant4x4" Id="{e24d7971-7368-49a0-be38-a2dd669b6474}">
+      <Declaration><![CDATA[METHOD Determinant4x4 : BOOL
+VAR_INPUT
+	ptrDeterminant	: POINTER TO LREAL;
+	ptrMatrix		: POINTER TO ARRAY[1..4,1..4] OF LREAL;
+END_VAR
+VAR
+	Matrix4x4		: ARRAY[1..4,1..4] OF LREAL;
+	Element1		: LREAL;
+	Element2		: LREAL;
+	RowMultiplier	: LREAL;
+	i				: INT;
+	j				: INT;
+	row 			: INT;
+	currentRow		: INT;
+	temp			: LREAL;
+	Swap			: BOOL;
+	index			: INT;
+	found			: BOOL;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[Matrix4x4 := ptrMatrix^;
+Swap := FALSE;
+FOR index := 1 TO 3 DO
+	IF Matrix4x4[index,index] = 0 THEN
+		found := FALSE;
+		FOR i:=index+1 TO 4 DO
+			IF Matrix4x4[index,i] <> 0 THEN
+				row := i;
+				found := TRUE;
+				EXIT;
+			END_IF
+		END_FOR
+		// swap current row with found row
+		IF found THEN
+			FOR i := 1 TO 4 DO
+				temp := Matrix4x4[i,index];
+				Matrix4x4[i,index] := Matrix4x4[i,row];
+				Matrix4x4[i,row] := temp;
+			END_FOR
+			Swap := NOT Swap;
+		ELSE
+			ptrDeterminant^ := 0;
+			Determinant4x4 := FALSE;
+			RETURN;
+		END_IF
+	END_IF
+	
+	FOR j := index+1 TO 4 DO
+		Element1 := Matrix4x4[index,index];
+		Element2 := Matrix4x4[index,j];
+		IF Element2 <> 0 THEN
+			RowMultiplier := Element2/Element1;
+			FOR i := 1 TO 4 DO
+				Matrix4x4[i,j] := Matrix4x4[i,j] - RowMultiplier*Matrix4x4[i,index];
+			END_FOR
+		END_IF
+	END_FOR
+END_FOR
+
+ptrDeterminant^ := 1;
+FOR i := 1 TO 4 DO
+	ptrDeterminant^ := ptrDeterminant^ * Matrix4x4[i,i];
+END_FOR
+
+IF Swap THEN
+	ptrDeterminant^ := ptrDeterminant^ * (-1);
+END_IF	
+Determinant4x4 := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="Determinant5x5" Id="{e56af53c-ca7e-4072-84ad-5cb27504ee7a}">
+      <Declaration><![CDATA[METHOD Determinant5x5 : BOOL
+VAR_INPUT
+	ptrDeterminant	: POINTER TO LREAL;
+	ptrMatrix		: POINTER TO ARRAY[1..5,1..5] OF LREAL;
+END_VAR
+VAR
+	Matrix5x5		: ARRAY[1..5,1..5] OF LREAL;
+	Element1		: LREAL;
+	Element2		: LREAL;
+	RowMultiplier	: LREAL;
+	i				: INT;
+	j				: INT;
+	row 			: INT;
+	currentRow		: INT;
+	temp			: LREAL;
+	Swap			: BOOL;
+	index			: INT;
+	found			: BOOL;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[Matrix5x5 := ptrMatrix^;
+Swap := FALSE;
+FOR index := 1 TO 4 DO
+	IF Matrix5x5[index,index] = 0 THEN
+		found := FALSE;
+		FOR i:=index+1 TO 5 DO
+			IF Matrix5x5[index,i] <> 0 THEN
+				row := i;
+				found := TRUE;
+				EXIT;
+			END_IF
+		END_FOR
+		// swap current row with found row
+		IF found THEN
+			FOR i := 1 TO 5 DO
+				temp := Matrix5x5[i,index];
+				Matrix5x5[i,index] := Matrix5x5[i,row];
+				Matrix5x5[i,row] := temp;
+			END_FOR
+			Swap := NOT Swap;
+		ELSE
+			ptrDeterminant^ := 0;
+			Determinant5x5 := FALSE;
+			RETURN;
+		END_IF
+	END_IF
+	
+	FOR j := index+1 TO 5 DO
+		Element1 := Matrix5x5[index,index];
+		Element2 := Matrix5x5[index,j];
+		IF Element2 <> 0 THEN
+			RowMultiplier := Element2/Element1;
+			FOR i := 1 TO 5 DO
+				Matrix5x5[i,j] := Matrix5x5[i,j] - RowMultiplier*Matrix5x5[i,index];
+			END_FOR
+		END_IF
+	END_FOR
+END_FOR
+
+ptrDeterminant^ := 1;
+FOR i := 1 TO 5 DO
+	ptrDeterminant^ := ptrDeterminant^ * Matrix5x5[i,i];
+END_FOR
+
+IF Swap THEN
+	ptrDeterminant^ := ptrDeterminant^ * (-1);
+END_IF	
+Determinant5x5 := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="FindCoefficients" Id="{843de65b-dcbd-44fa-8e23-b40c74a2ae1d}">
+      <Declaration><![CDATA[METHOD FindCoefficients : BOOL
+VAR_INPUT
+	xValues		: POINTER TO ARRAY[1..GVL.NumberVisionPoints] OF LREAL;
+	yValues		: POINTER TO ARRAY[1..GVL.NumberVisionPoints] OF LREAL;
+	Coefficients: POINTER TO ARRAY[1..5] OF LREAL;
+END_VAR
+VAR_INST 
+	xMatrix		: ARRAY[1..5, 1..GVL.NumberVisionPoints] OF LREAL;
+	xTMatrix	: ARRAY[1..GVL.NumberVisionPoints, 1..5] OF LREAL; 
+	xTxMatrix	: ARRAY[1..5,1..5] OF LREAL;
+	xTxInverse	: ARRAY[1..5,1..5] OF LREAL;
+	xTxXMatrix	: ARRAY[1..GVL.NumberVisionPoints,1..5] OF LREAL;
+	xTyMatrix	: ARRAY[1..5] OF LREAL;
+	i			: INT;
+	j			: INT;
+	k			: INT;
+	DotProduct	: LREAL;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// fill out x matrix
+// fill out transpose of x matrix
+FOR i := 1 TO order+1 DO	// column
+	FOR j := 1 TO GVL.NumberVisionPoints DO
+		xMatrix[i,j] := EXPT((xValues^[j]),(i-1));	// column, row
+		xTMatrix[j,i] := xMatrix[i,j];
+	END_FOR
+END_FOR
+
+// fill out xT * x 
+FOR i := 1 TO order+1 DO		// rows
+	FOR j := 1 TO order+1 DO	
+		DotProduct := 0;
+		FOR k := 1 TO GVL.NumberVisionPoints DO
+			DotProduct := DotProduct + xTMatrix[k,i]*xMatrix[j,k];
+		END_FOR
+		xTxMatrix[j,i] := DotProduct;
+	END_FOR
+END_FOR
+
+// find out the inverse of xT*x
+Inverse(ADR(xTxMatrix), ADR(xTxInverse));
+
+// multiple xT*y
+FOR i := 1 TO order+1 DO
+	DotProduct := 0;
+	FOR j := 1 TO GVL.NumberVisionPoints DO
+		DotProduct := DotProduct + xTMatrix[j,i] * yValues^[j];
+	END_FOR
+	xTyMatrix[i] := DotProduct;
+END_FOR
+
+// multiply xTxInverse by xTy
+FOR i := 1 TO order+1 DO
+	DotProduct := 0;
+	FOR j := 1 TO order+1 DO
+		DotProduct := DotProduct + xTxInverse[j,i]*xTyMatrix[j];
+	END_FOR
+	Coefficients^[i] := DotProduct;
+END_FOR]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="FindYatX" Id="{e166b935-2b01-4c4a-a248-6c9ccb60e316}">
+      <Declaration><![CDATA[METHOD FindYatX : BOOL
+VAR_INPUT
+	xValues			: POINTER TO ARRAY[1..GVL.NumberVisionPoints] OF LREAL;
+	yValues			: POINTER TO ARRAY[1..GVL.NumberVisionPoints] OF LREAL;
+	xPeak			: POINTER TO LREAL;
+	yPeak			: POINTER TO LREAL;
+END_VAR
+VAR
+	Coefficients	: ARRAY[1..5] OF LREAL;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[FindCoefficients(xValues := xValues, yValues := yValues, Coefficients := ADR(Coefficients));
+yPeak^ := Coefficients[1] + Coefficients[2] * xPeak^ + Coefficients[3]*EXPT(xPeak^,2) + 
+		Coefficients[4]*EXPT(xPeak^,3) + Coefficients[5]*EXPT(xPeak^,4);
+
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="Inverse" Id="{431b774c-e7fd-4c28-b706-44889ff9860f}">
+      <Declaration><![CDATA[METHOD Inverse : BOOL
+VAR_INPUT
+	ptrMatrix		: POINTER TO ARRAY[1..5,1..5] OF LREAL;
+	ptrInverse		: POINTER TO ARRAY[1..5,1..5] OF LREAL;
+END_VAR
+VAR
+	Determinant		: LREAL;
+	Matrix			: ARRAY[1..5,1..5] OF LREAL;
+	_Cofactor		: LREAL;
+	i				: INT;
+	j				: INT;
+	SignRow: BOOL;
+	SignColumn: BOOL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF Determinant5x5(ptrDeterminant := ADR(Determinant), ptrMatrix := ptrMatrix) THEN
+	Determinant := 1 / Determinant;
+	// get cofactors
+	FOR i := 1 TO order+1 DO
+		FOR j := 1 TO order+1 DO
+			IF Cofactor(ptrMatrix5x5 := ptrMatrix, ptrCofactor := ADR(_Cofactor), row := i, column := j) THEN
+				Matrix[i,j] := _Cofactor;
+			ELSE
+				Inverse := FALSE;
+				RETURN;
+			END_IF
+		END_FOR
+	END_FOR
+	
+	SignRow := TRUE;
+	SignColumn := TRUE;
+	FOR i := 1 TO order+1 DO
+		FOR j := 1 TO order+1 DO
+			IF NOT SignRow THEN
+				Matrix[i,j] := (-1) * Matrix[i,j];
+			END_IF
+			SignRow := NOT SignRow;
+		END_FOR
+		SignColumn := NOT SignColumn;
+		SignRow := SignColumn;
+	END_FOR
+	// transpose 
+	Transpose(ADR(Matrix),ptrInverse);
+	FOR i := 1 TO order+1 DO
+		FOR j := 1 TO order+1 DO
+			ptrInverse^[i,j] := Determinant * ptrInverse^[i,j];
+		END_FOR
+	END_FOR
+	
+	Inverse := TRUE;
+ELSE
+	Inverse := FALSE;
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="Transpose" Id="{5863d92c-7668-40e1-9ce1-9449dbcdf8e5}">
+      <Declaration><![CDATA[METHOD Transpose : BOOL
+VAR_INPUT
+	ptrMatrix		: POINTER TO ARRAY[1..5,1..5] OF LREAL;
+	ptrTranspose	: POINTER TO ARRAY[1..5,1..5] OF LREAL;
+END_VAR
+VAR
+	i				: INT;
+	j				: INT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[FOR i := 1 TO order+1 DO
+	FOR j := 1 TO order+1 DO
+		ptrTranspose^[j,i] := ptrMatrix^[i,j];
+	END_FOR
+END_FOR]]></ST>
+      </Implementation>
+    </Method>
+    <LineIds Name="FB_FourthOrder">
+      <LineId Id="11" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_FourthOrder.Cofactor">
+      <LineId Id="5" Count="0" />
+      <LineId Id="17" Count="0" />
+      <LineId Id="44" Count="0" />
+      <LineId Id="18" Count="0" />
+      <LineId Id="24" Count="1" />
+      <LineId Id="30" Count="1" />
+      <LineId Id="28" Count="0" />
+      <LineId Id="26" Count="0" />
+      <LineId Id="32" Count="0" />
+      <LineId Id="21" Count="0" />
+      <LineId Id="19" Count="0" />
+      <LineId Id="34" Count="0" />
+      <LineId Id="33" Count="0" />
+      <LineId Id="38" Count="2" />
+      <LineId Id="37" Count="0" />
+      <LineId Id="45" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_FourthOrder.Determinant4x4">
+      <LineId Id="254" Count="47" />
+      <LineId Id="189" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_FourthOrder.Determinant5x5">
+      <LineId Id="110" Count="1" />
+      <LineId Id="184" Count="0" />
+      <LineId Id="200" Count="0" />
+      <LineId Id="214" Count="0" />
+      <LineId Id="201" Count="0" />
+      <LineId Id="203" Count="0" />
+      <LineId Id="205" Count="0" />
+      <LineId Id="213" Count="0" />
+      <LineId Id="207" Count="0" />
+      <LineId Id="206" Count="0" />
+      <LineId Id="204" Count="0" />
+      <LineId Id="208" Count="0" />
+      <LineId Id="215" Count="0" />
+      <LineId Id="209" Count="1" />
+      <LineId Id="219" Count="1" />
+      <LineId Id="211" Count="0" />
+      <LineId Id="221" Count="2" />
+      <LineId Id="225" Count="0" />
+      <LineId Id="224" Count="0" />
+      <LineId Id="216" Count="0" />
+      <LineId Id="202" Count="0" />
+      <LineId Id="217" Count="0" />
+      <LineId Id="113" Count="10" />
+      <LineId Id="227" Count="0" />
+      <LineId Id="226" Count="0" />
+      <LineId Id="228" Count="2" />
+      <LineId Id="232" Count="0" />
+      <LineId Id="231" Count="0" />
+      <LineId Id="233" Count="2" />
+      <LineId Id="189" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_FourthOrder.FindCoefficients">
+      <LineId Id="35" Count="1" />
+      <LineId Id="5" Count="0" />
+      <LineId Id="12" Count="0" />
+      <LineId Id="14" Count="0" />
+      <LineId Id="20" Count="0" />
+      <LineId Id="15" Count="0" />
+      <LineId Id="13" Count="0" />
+      <LineId Id="37" Count="0" />
+      <LineId Id="23" Count="0" />
+      <LineId Id="22" Count="0" />
+      <LineId Id="24" Count="0" />
+      <LineId Id="32" Count="0" />
+      <LineId Id="26" Count="0" />
+      <LineId Id="30" Count="1" />
+      <LineId Id="33" Count="0" />
+      <LineId Id="27" Count="0" />
+      <LineId Id="25" Count="0" />
+      <LineId Id="39" Count="0" />
+      <LineId Id="38" Count="0" />
+      <LineId Id="40" Count="0" />
+      <LineId Id="42" Count="0" />
+      <LineId Id="41" Count="0" />
+      <LineId Id="87" Count="1" />
+      <LineId Id="90" Count="3" />
+      <LineId Id="89" Count="0" />
+      <LineId Id="94" Count="0" />
+      <LineId Id="56" Count="0" />
+      <LineId Id="95" Count="0" />
+      <LineId Id="100" Count="0" />
+      <LineId Id="96" Count="0" />
+      <LineId Id="98" Count="1" />
+      <LineId Id="101" Count="0" />
+      <LineId Id="97" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_FourthOrder.FindYatX">
+      <LineId Id="5" Count="0" />
+      <LineId Id="13" Count="0" />
+      <LineId Id="15" Count="0" />
+      <LineId Id="14" Count="0" />
+      <LineId Id="11" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_FourthOrder.Inverse">
+      <LineId Id="60" Count="0" />
+      <LineId Id="11" Count="0" />
+      <LineId Id="26" Count="0" />
+      <LineId Id="21" Count="1" />
+      <LineId Id="61" Count="0" />
+      <LineId Id="30" Count="0" />
+      <LineId Id="32" Count="0" />
+      <LineId Id="34" Count="0" />
+      <LineId Id="33" Count="0" />
+      <LineId Id="31" Count="0" />
+      <LineId Id="25" Count="0" />
+      <LineId Id="23" Count="0" />
+      <LineId Id="35" Count="2" />
+      <LineId Id="39" Count="0" />
+      <LineId Id="41" Count="0" />
+      <LineId Id="43" Count="0" />
+      <LineId Id="45" Count="2" />
+      <LineId Id="44" Count="0" />
+      <LineId Id="48" Count="1" />
+      <LineId Id="42" Count="0" />
+      <LineId Id="51" Count="3" />
+      <LineId Id="56" Count="1" />
+      <LineId Id="55" Count="0" />
+      <LineId Id="17" Count="1" />
+      <LineId Id="13" Count="1" />
+      <LineId Id="12" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_FourthOrder.Transpose">
+      <LineId Id="5" Count="0" />
+      <LineId Id="12" Count="0" />
+      <LineId Id="14" Count="1" />
+      <LineId Id="13" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

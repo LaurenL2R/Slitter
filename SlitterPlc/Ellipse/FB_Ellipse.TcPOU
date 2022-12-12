@@ -1,0 +1,1054 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.3">
+  <POU Name="FB_Ellipse" Id="{610dfe79-022d-4798-9218-736c1ec0a1b1}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Ellipse
+VAR_INPUT
+END_VAR
+VAR_OUTPUT
+END_VAR
+VAR CONSTANT
+END_VAR
+VAR
+	_xValues				: ARRAY[1..GVL.NumberEllipsePoints] OF LREAL := [0,1,2,3,4,5,6,7,8,9];
+	_yValues				: ARRAY[1..GVL.NumberEllipsePoints] OF LREAL := [5,4.975,4.899,4.770,4.583,4.330,4.000,3.571,3.000,2.179];
+
+	m_residuals		: ARRAY[1..GVL.NumberEllipsePoints] OF LREAL;						// [NumDataPts x 1]
+	m_design		: ARRAY[1..GVL.Unknowns, 1..GVL.NumberEllipsePoints] OF LREAL;		// [NumDataPts x 5]
+	m_l				: ARRAY[1..GVL.NumberEllipsePoints] OF LREAL;						// [NumDataPts x 1]
+	m_qweight		: ARRAY[1..GVL.NumberEllipsePoints, 1..GVL.NumberEllipsePoints] OF LREAL;	// [NumDataPts x NumDataPts]
+	m_observations	: ARRAY[1..2,1..GVL.NumberEllipsePoints] OF LREAL; 				// [NumDataPts x 2]
+	m_b				: ARRAY[1..2*GVL.NumberEllipsePoints, 1..GVL.NumberEllipsePoints] OF LREAL;	// [NumDataPts x NumDataPts*2]
+	m_miny			: LREAL;
+	m_maxy			: LREAL;
+	m_minx			: LREAL;
+	m_maxx			: LREAL;
+	m_provisionals	: ARRAY[1..GVL.Unknowns] OF LREAL; // [5 x 1]
+	m_solutions		: ARRAY[1..GVL.Unknowns] OF LREAL; // [5 x 1]
+
+// junk
+	_pa				: ARRAY[1..GVL.Unknowns, 1..GVL.NumberEllipsePoints] OF LREAL;	
+	_atpa			: ARRAY[1..GVL.Unknowns, 1..GVL.Unknowns] OF LREAL;
+	_atpaInverse		: ARRAY[1..GVL.Unknowns, 1..GVL.Unknowns] OF LREAL;
+	_pl				: ARRAY[1..GVL.NumberEllipsePoints] OF LREAL; 
+	_atpl			: ARRAY[1..GVL.Unknowns] OF LREAL;
+	_cofactorMatrix	: ARRAY[1..5,1..5] OF LREAL;
+	_cofactorMatrixSigned : ARRAY[1..5,1..5] OF LREAL;
+	_cofactorMatrixT : ARRAY[1..5,1..5] OF LREAL;
+
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[]]></ST>
+    </Implementation>
+    <Method Name="AddObservation" Id="{2d4a86fb-005d-407a-9276-118b97510afb}">
+      <Declaration><![CDATA[METHOD AddObservation : BOOL
+VAR_INPUT
+END_VAR
+VAR
+	i	: INT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[m_minx := _xValues[1];
+m_maxx := _xValues[1];
+m_miny := _yValues[1];
+m_maxy := _yValues[1];
+FOR i := 1 TO GVL.NumberEllipsePoints DO
+	m_observations[1,i] := _xValues[i];
+	m_observations[2,i] := _yValues[i];
+	IF _xValues[i] > m_maxx THEN
+		m_maxx := _xValues[i];
+	END_IF
+	IF _xValues[i] < m_minx THEN
+		m_minx := _xValues[i];
+	END_IF
+	IF _yValues[i] > m_maxy THEN
+		m_maxy := _yValues[i];
+	END_IF
+	IF _yValues[i] < m_miny THEN
+		m_miny := _yValues[i];
+	END_IF
+END_FOR]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="centrex" Id="{8eb1d684-4202-4a5e-98d1-760c87ebdea0}">
+      <Declaration><![CDATA[PROPERTY centrex : LREAL]]></Declaration>
+      <Get Name="Get" Id="{1845c99a-b81a-4f15-a43a-362c2aba7a30}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[centrex := m_provisionals[1];
+
+(*
+m_provisionals[1] := _centrex;
+m_provisionals[2] := _centrey;
+m_provisionals[3] := _major;
+m_provisionals[4] := _minor;
+m_provisionals[5] := _rotation;
+*)]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="centrey" Id="{998dc4cc-6d26-4fe5-9c49-e597ecd4adf6}">
+      <Declaration><![CDATA[PROPERTY centrey : LREAL]]></Declaration>
+      <Get Name="Get" Id="{81a6c5fc-14f6-44ae-b4c5-971fa0220c94}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[centrey := m_provisionals[2];
+
+(*
+m_provisionals[1] := _centrex;
+m_provisionals[2] := _centrey;
+m_provisionals[3] := _major;
+m_provisionals[4] := _minor;
+m_provisionals[5] := _rotation;
+*)
+
+]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Method Name="Cofactor" Id="{087f49c2-63aa-4fcd-9589-ab92a77c404a}">
+      <Declaration><![CDATA[METHOD Cofactor : BOOL
+VAR_INPUT
+	ptrMatrix5x5	: POINTER TO ARRAY[1..5,1..5] OF LREAL;
+	ptrCofactor		: POINTER TO LREAL;
+	row				: INT;
+	column			: INT;
+END_VAR
+VAR
+	Matrix4x4	: ARRAY[1..4,1..4] OF LREAL;	
+	i			: INT;
+	j			: INT;
+	k			: INT;
+	m			: INT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[k := 1;
+FOR i := 1 TO 5 DO				// columns
+	m := 1;
+	IF i <> column THEN						
+		FOR j := 1 TO 5 DO		
+			IF j <> row THEN
+				Matrix4x4[k,m] := ptrMatrix5x5^[i,j];
+				m := m + 1;
+			END_IF
+		END_FOR
+		k := k + 1;
+	END_IF
+END_FOR
+
+IF Determinant4x4(ptrDeterminant := ptrCofactor, ptrMatrix := ADR(Matrix4x4)) THEN
+	Cofactor := TRUE;
+ELSE
+	Cofactor := FALSE;
+END_IF
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="Compute" Id="{cac3215d-f55a-4cdb-aa81-4bdd7d8820ae}">
+      <Declaration><![CDATA[METHOD Compute : BOOL
+VAR_INPUT
+END_VAR
+VAR_INST
+	successful	: BOOL;
+	iteration	: INT;
+	bHasConverged	: BOOL;
+	bIsDegenerate	: BOOL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[GenerateProvisionals();
+
+successful := TRUE;
+bHasConverged := FALSE;
+bIsDegenerate := FALSE;
+
+iteration := 0;
+
+WHILE (TRUE) DO
+	FormulateMatrices();
+	IF (EvaluateUnknowns()) THEN
+		iteration := iteration + 1;
+		EvaluateAdjustedUnknowns();
+		IF HasConverged() THEN
+			bHasConverged := TRUE;
+			EXIT;
+		END_IF
+		IF IsDegenerate(iteration) THEN
+			bIsDegenerate := TRUE;
+			EXIT;
+		END_IF
+	ELSE
+		successful := FALSE;
+		EXIT;
+	END_IF	
+END_WHILE
+
+successful := successful AND (iteration > 0 AND iteration < GVL.MaxIterations);
+IF successful THEN
+	NormalizeAdjustedUnknowns();
+	EvaluateResiduals();
+//	EvaluateAdjustedObservations();
+//	GlobalCheck();
+//	ErrorAnalysis(iteration);
+END_IF
+
+Compute := successful;
+
+
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="Determinant4x4" Id="{4232af70-9d7b-46a6-a591-25ee5c6d2fc3}">
+      <Declaration><![CDATA[METHOD Determinant4x4 : BOOL
+VAR_INPUT
+	ptrDeterminant	: POINTER TO LREAL;
+	ptrMatrix		: POINTER TO ARRAY[1..4,1..4] OF LREAL;
+END_VAR
+VAR
+	Matrix4x4		: ARRAY[1..4,1..4] OF LREAL;
+	Element1		: LREAL;
+	Element2		: LREAL;
+	RowMultiplier	: LREAL;
+	i				: INT;
+	j				: INT;
+	row 			: INT;
+	currentRow		: INT;
+	temp			: LREAL;
+	Swap			: BOOL;
+	index			: INT;
+	found			: BOOL;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[Matrix4x4 := ptrMatrix^;
+Swap := FALSE;
+FOR index := 1 TO 3 DO
+	IF Matrix4x4[index,index] = 0 THEN
+		found := FALSE;
+		FOR i:=index+1 TO 4 DO
+			IF Matrix4x4[index,i] <> 0 THEN
+				row := i;
+				found := TRUE;
+				EXIT;
+			END_IF
+		END_FOR
+		// swap current row with found row
+		IF found THEN
+			FOR i := 1 TO 4 DO
+				temp := Matrix4x4[i,index];
+				Matrix4x4[i,index] := Matrix4x4[i,row];
+				Matrix4x4[i,row] := temp;
+			END_FOR
+			Swap := NOT Swap;
+		ELSE
+			ptrDeterminant^ := 0;
+			Determinant4x4 := FALSE;
+			RETURN;
+		END_IF
+	END_IF
+	
+	FOR j := index+1 TO 4 DO
+		Element1 := Matrix4x4[index,index];
+		Element2 := Matrix4x4[index,j];
+		IF Element2 <> 0 THEN
+			RowMultiplier := Element2/Element1;
+			FOR i := 1 TO 4 DO
+				Matrix4x4[i,j] := Matrix4x4[i,j] - RowMultiplier*Matrix4x4[i,index];
+			END_FOR
+		END_IF
+	END_FOR
+END_FOR
+
+ptrDeterminant^ := 1;
+FOR i := 1 TO 4 DO
+	ptrDeterminant^ := ptrDeterminant^ * Matrix4x4[i,i];
+END_FOR
+
+IF Swap THEN
+	ptrDeterminant^ := ptrDeterminant^ * (-1);
+END_IF	
+Determinant4x4 := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="Determinant5x5" Id="{f63bdc74-3a2e-4c21-bb85-ae3cebb64118}">
+      <Declaration><![CDATA[METHOD Determinant5x5 : BOOL
+VAR_INPUT
+	ptrDeterminant	: POINTER TO LREAL;
+	ptrMatrix		: POINTER TO ARRAY[1..5,1..5] OF LREAL;
+END_VAR
+VAR
+	Matrix5x5		: ARRAY[1..5,1..5] OF LREAL;
+	Element1		: LREAL;
+	Element2		: LREAL;
+	RowMultiplier	: LREAL;
+	i				: INT;
+	j				: INT;
+	row 			: INT;
+	currentRow		: INT;
+	temp			: LREAL;
+	Swap			: BOOL;
+	index			: INT;
+	found			: BOOL;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[Matrix5x5 := ptrMatrix^;
+Swap := FALSE;
+FOR index := 1 TO 4 DO
+	IF Matrix5x5[index,index] = 0 THEN
+		found := FALSE;
+		FOR i:=index+1 TO 5 DO
+			IF Matrix5x5[index,i] <> 0 THEN
+				row := i;
+				found := TRUE;
+				EXIT;
+			END_IF
+		END_FOR
+		// swap current row with found row
+		IF found THEN
+			FOR i := 1 TO 5 DO
+				temp := Matrix5x5[i,index];
+				Matrix5x5[i,index] := Matrix5x5[i,row];
+				Matrix5x5[i,row] := temp;
+			END_FOR
+			Swap := NOT Swap;
+		ELSE
+			ptrDeterminant^ := 0;
+			Determinant5x5 := FALSE;
+			RETURN;
+		END_IF
+	END_IF
+	
+	FOR j := index+1 TO 5 DO
+		Element1 := Matrix5x5[index,index];
+		Element2 := Matrix5x5[index,j];
+		IF Element2 <> 0 THEN
+			RowMultiplier := Element2/Element1;
+			FOR i := 1 TO 5 DO
+				Matrix5x5[i,j] := Matrix5x5[i,j] - RowMultiplier*Matrix5x5[i,index];
+			END_FOR
+		END_IF
+	END_FOR
+END_FOR
+
+ptrDeterminant^ := 1;
+FOR i := 1 TO 5 DO
+	ptrDeterminant^ := ptrDeterminant^ * Matrix5x5[i,i];
+END_FOR
+
+IF Swap THEN
+	ptrDeterminant^ := ptrDeterminant^ * (-1);
+END_IF	
+Determinant5x5 := TRUE;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="EllipseFit" Id="{af74a6d4-44d7-4002-83c1-4a5bf46e82b9}">
+      <Declaration><![CDATA[METHOD EllipseFit : BOOL
+VAR_INPUT
+	xValues	: ARRAY[1..GVL.NumberEllipsePoints] OF LREAL;
+	yValues	: ARRAY[1..GVL.NumberEllipsePoints] OF LREAL;
+END_VAR
+VAR 
+	i		: INT;
+	x		: LREAL;
+	y		: LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_xValues := xValues;
+_yValues := yValues;
+AddObservation();
+Compute();]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="ErrorAnalysis" Id="{34cf1f90-1257-48dd-8307-5389cf3e72f0}">
+      <Declaration><![CDATA[METHOD ErrorAnalysis : BOOL
+VAR_INPUT
+	iteration	: INT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="EvaluateAdjustedUnknowns" Id="{cbd5ce56-e0b4-4f9e-8d8b-526ca36a2dfc}">
+      <Declaration><![CDATA[METHOD EvaluateAdjustedUnknowns : BOOL
+VAR_INPUT
+END_VAR
+VAR
+	i		: INT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[FOR i:=1 TO GVL.Unknowns DO
+	m_provisionals[i] := m_provisionals[i] + m_solutions[i];
+END_FOR]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="EvaluateResiduals" Id="{ff63aedb-d921-4fbb-bed3-a332335f242f}">
+      <Declaration><![CDATA[METHOD EvaluateResiduals : BOOL
+VAR
+	i			: INT;
+	j			: INT;
+	k			: INT;
+	DotProduct	: LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// m_residuals = prod(m_design, m_solution) - m_l
+
+FOR i := 1 TO GVL.NumberEllipsePoints DO // rows
+	DotProduct := 0;
+	FOR j := 1 TO GVL.Unknowns DO
+		DotProduct := DotProduct + m_design[j,i]*m_solutions[j];
+	END_FOR
+	m_residuals[i] := DotProduct;
+END_FOR
+
+FOR i := 1 TO GVL.NumberEllipsePoints DO
+	m_residuals[i] := m_residuals[i] - m_l[i];
+END_FOR
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="EvaluateUnknowns" Id="{251f1e06-ac49-4cdb-8264-a793973b4ff7}">
+      <Declaration><![CDATA[METHOD EvaluateUnknowns : BOOL
+VAR_INPUT
+END_VAR
+VAR
+	pa				: ARRAY[1..GVL.Unknowns, 1..GVL.NumberEllipsePoints] OF LREAL;	
+	atpa			: ARRAY[1..GVL.Unknowns, 1..GVL.Unknowns] OF LREAL;
+	atpaInverse		: ARRAY[1..GVL.Unknowns, 1..GVL.Unknowns] OF LREAL;
+	pl				: ARRAY[1..GVL.NumberEllipsePoints] OF LREAL; 
+	atpl			: ARRAY[1..GVL.Unknowns] OF LREAL;
+	i				: INT;
+	j				: INT;
+	k				: INT;
+	DotProduct		: LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[(*
+1. pa := prod(m_qweight, m_design)
+2. atpa := prod(trans(m_design), pa)
+3. create a matrix variable inverse of size 5x5
+4. determine the inverse of atpa
+5. if there is an inverse:
+6. pl = prod(m_qweight, m_l)
+7. atpl = prod(trans(m_design),pl)
+8. m_solution = prod(inverse, atpl)
+*)
+
+// pa = prod(m_qweight, m_design)
+// [NumDataPts x NumDataPts] . [NumDataPts x Unknowns]
+// [NumDataPts x Unknowns]
+FOR i := 1 TO GVL.NumberEllipsePoints DO	// rows
+	FOR j := 1 TO GVL.Unknowns DO		// columns
+		DotProduct := 0;
+		FOR k := 1 TO GVL.NumberEllipsePoints DO
+			DotProduct := DotProduct + m_qweight[k,i]*m_design[j,k];
+		END_FOR
+		pa[j,i] := DotProduct;
+	END_FOR
+END_FOR
+
+// atpa = prod(trans(m_design), pa)
+// [Unknown x NumDataPts] . [NumDataPts x Unknown]
+// [Unknown x Unknown]
+FOR i := 1 TO GVL.Unknowns DO 		// rows
+	FOR j := 1 TO GVL.Unknowns DO 	// columns
+		DotProduct := 0;
+		FOR k := 1 TO GVL.NumberEllipsePoints DO
+			DotProduct := DotProduct + m_design[i,k]*pa[j,k];
+		END_FOR
+		atpa[j,i] := DotProduct;
+	END_FOR
+END_FOR
+
+// find inverse of atpa
+IF Inverse(ADR(atpa),ADR(atpaInverse)) THEN
+	// pl = prod(m_qweight, ml) = [NumDataPts x NumDataPts] * [NumDataPts x 1] = [NumDataPts x 1]
+	FOR i := 1 TO GVL.NumberEllipsePoints DO			// rows
+		DotProduct := 0;
+		FOR k := 1 TO GVL.NumberEllipsePoints DO
+			DotProduct := DotProduct + m_qweight[k,i]*m_l[k];
+		END_FOR
+		pl[i] := DotProduct;
+	END_FOR
+	// atpl = prod(trans(m_design), pl)
+	FOR i := 1 TO GVL.Unknowns DO	// rows
+		DotProduct := 0;
+		FOR k := 1 TO GVL.NumberEllipsePoints DO // columns
+			DotProduct := DotProduct + m_design[i,k]*pl[k];
+		END_FOR
+		atpl[i] := DotProduct;
+	END_FOR
+	// m_solution = prod(inverse, atpl)
+	FOR i := 1 TO GVL.Unknowns DO	// rows
+		DotProduct := 0;
+		FOR k := 1 TO GVL.Unknowns DO // columns
+			DotProduct := DotProduct + atpaInverse[k,i]*atpl[k];
+		END_FOR
+		m_solutions[i] := DotProduct;
+	END_FOR
+	EvaluateUnknowns := TRUE;
+ELSE
+	EvaluateUnknowns := FALSE;
+END_IF
+
+_pa := pa;
+_atpa := atpa;
+_atpaInverse := atpaInverse;
+_pl := pl;
+_atpl := atpl;
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="FormulateMatrices" Id="{8e6cf0f5-0c2a-4144-96bf-2d60c7d27d2e}">
+      <Declaration><![CDATA[METHOD FormulateMatrices : BOOL
+VAR_INPUT
+END_VAR
+VAR
+	x0		: LREAL;
+	y0		: LREAL;
+	a		: LREAL;
+	b		: LREAL;
+	
+	sinr	: LREAL;
+	cosr	: LREAL;
+	asqr	: LREAL;
+	bsqr	: LREAL;
+	i		: INT;
+	x		: LREAL;
+	y		: LREAL;
+	d1		: LREAL;
+	d2		: LREAL;
+	p		: LREAL;
+	q		: LREAL;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[x0 := m_provisionals[1];
+y0 := m_provisionals[2];
+a := m_provisionals[3];
+b := m_provisionals[4];
+
+sinr := SIN(m_provisionals[5]);
+cosr := COS(m_provisionals[5]);
+asqr := a * a;
+bsqr := b * b;
+
+FOR i := 1 TO GVL.NumberEllipsePoints DO
+	x := m_observations[1,i];
+	y := m_observations[2,i];
+	
+	d1 := ((y - y0) * cosr - (x - x0)*sinr);
+	d2 := ((x - x0) * cosr + (y - y0)*sinr);
+	
+	m_design[1,i] := 2.0 * ((asqr * d1 * sinr) - (bsqr * d2 * cosr));
+	m_design[2,i] := -2.0 * ((bsqr * d2 * sinr) + (asqr * d1 * cosr));
+	m_design[3,i] := 2.0 * a * ((d1 * d1) - bsqr);
+	m_design[4,i] := 2.0 * b * ((d2 * d2) - asqr);
+	m_design[5,i] := 2.0 * d1 * d2 * (bsqr - asqr);
+	
+	p := 2.0 * ((asqr * d1 * sinr) + (bsqr * d2 * cosr));
+	q := -2.0 * ((bsqr * d2 * sinr) + (asqr * d1 * cosr));
+	m_qweight[i,i] := 1.0 / (p * p + q * q);
+	m_l[i] := -1*((asqr * d1 * d1) + (bsqr * d2 * d2) - (asqr * bsqr));
+END_FOR]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="GenerateProvisionals" Id="{39db6023-ffce-4370-878d-e1afb2915b56}">
+      <Declaration><![CDATA[METHOD GenerateProvisionals : BOOL
+VAR
+	_centrex		: LREAL;
+	_centrey		: LREAL;
+	_dx			: LREAL;
+	_dy			: LREAL;
+	_major		: LREAL;
+	_minor		: LREAL;
+	_rotation	: LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_centrex := 0.5 * (m_maxx + m_minx);
+_centrey := 0.5 * (m_maxy + m_miny);
+_dx := m_maxx - m_minx;
+_dy := m_maxy - m_miny;
+IF _dx > _dy THEN
+	_major := 0.5 * _dx;
+	_minor := 0.5 * _dy;
+ELSE
+	_major := 0.5 * _dy;
+	_minor := 0.5 * _dx;
+END_IF
+_rotation := ATAN(_dy/_dx);
+
+m_provisionals[1] := _centrex;
+m_provisionals[2] := _centrey;
+m_provisionals[3] := _major;
+m_provisionals[4] := _minor;
+m_provisionals[5] := _rotation;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="HasConverged" Id="{4f4a6c84-f4e2-47a4-bd2d-e685f281712b}">
+      <Declaration><![CDATA[METHOD HasConverged : BOOL
+VAR_INPUT
+END_VAR
+VAR
+	i		: INT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[HasConverged := TRUE;
+FOR i := 1 TO GVL.Unknowns DO
+	IF ABS(m_solutions[i]) > GVL.ConvergenceCriteria THEN
+		HasConverged := FALSE;
+	END_IF
+END_FOR]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="Inverse" Id="{abae02cb-af56-4ccf-ba50-e09b76b5b40a}">
+      <Declaration><![CDATA[METHOD Inverse : BOOL
+VAR_INPUT
+	ptrMatrix		: POINTER TO ARRAY[1..5,1..5] OF LREAL;
+	ptrInverse		: POINTER TO ARRAY[1..5,1..5] OF LREAL;
+END_VAR
+VAR
+	Determinant		: LREAL;
+	Matrix			: ARRAY[1..5,1..5] OF LREAL;
+	_Cofactor		: LREAL;
+	i				: INT;
+	j				: INT;
+	SignRow: BOOL;
+	SignColumn: BOOL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF Determinant5x5(ptrDeterminant := ADR(Determinant), ptrMatrix := ptrMatrix) THEN
+	Determinant := 1 / Determinant;
+	// get cofactors
+	FOR i := 1 TO 5 DO
+		FOR j := 1 TO 5 DO
+			IF Cofactor(ptrMatrix5x5 := ptrMatrix, ptrCofactor := ADR(_Cofactor), row := i, column := j) THEN
+				Matrix[i,j] := _Cofactor;
+			ELSE
+				Inverse := FALSE;
+				RETURN;
+			END_IF
+		END_FOR
+	END_FOR
+	_cofactorMatrix := Matrix;
+	
+	SignRow := TRUE;
+	SignColumn := TRUE;
+	FOR i := 1 TO 5 DO
+		FOR j := 1 TO 5 DO
+			IF NOT SignRow THEN
+				Matrix[i,j] := (-1) * Matrix[i,j];
+			END_IF
+			SignRow := NOT SignRow;
+		END_FOR
+		SignColumn := NOT SignColumn;
+		SignRow := SignColumn;
+	END_FOR
+	_cofactorMatrixSigned := Matrix;
+	// transpose 
+	Transpose(ADR(Matrix),ptrInverse);
+	_cofactorMatrixT := ptrInverse^;
+	FOR i := 1 TO 5 DO
+		FOR j := 1 TO 5 DO
+			ptrInverse^[i,j] := Determinant * ptrInverse^[i,j];
+		END_FOR
+	END_FOR
+	
+	Inverse := TRUE;
+ELSE
+	Inverse := FALSE;
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="IsDegenerate" Id="{7c01adec-c3bd-4fd5-b094-af12839c5a84}">
+      <Declaration><![CDATA[METHOD IsDegenerate : BOOL
+VAR_INPUT
+	iteration	: INT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IsDegenerate := (iteration > GVL.MaxIterations);
+]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="major" Id="{4e84cb4d-920f-413d-918f-51f6bd9515cd}">
+      <Declaration><![CDATA[PROPERTY major : LREAL]]></Declaration>
+      <Get Name="Get" Id="{39c1fb2e-f57d-4f78-bb34-49215f653245}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[major := m_provisionals[3];
+
+(*
+m_provisionals[1] := _centrex;
+m_provisionals[2] := _centrey;
+m_provisionals[3] := _major;
+m_provisionals[4] := _minor;
+m_provisionals[5] := _rotation;
+*)]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="minor" Id="{86f83581-2a88-4188-ab22-fbb1a401cfb1}">
+      <Declaration><![CDATA[PROPERTY minor : LREAL]]></Declaration>
+      <Get Name="Get" Id="{a1f74b38-82cb-4bf6-9d2d-ac10ee095c89}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[minor := m_provisionals[4];
+
+(*
+m_provisionals[1] := _centrex;
+m_provisionals[2] := _centrey;
+m_provisionals[3] := _major;
+m_provisionals[4] := _minor;
+m_provisionals[5] := _rotation;
+*)]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Method Name="NormalizeAdjustedUnknowns" Id="{d14ff766-18ba-43a3-b018-5c64a8e5c37c}">
+      <Declaration><![CDATA[METHOD NormalizeAdjustedUnknowns : BOOL
+VAR_INPUT
+END_VAR
+VAR
+	theta		: LREAL;
+	negative	: BOOL;
+	major		: LREAL;
+	minor		: LREAL;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[theta := ABS(m_provisionals[5]);
+negative := m_provisionals[5] < 0;
+
+theta := LMOD(theta, 2*3.14159);
+IF negative THEN
+	theta := 2*3.14159 - theta;
+END_IF
+
+major := m_provisionals[3];
+minor := m_provisionals[4];
+IF minor > major THEN
+	m_provisionals[3] := minor;
+	m_provisionals[4] := major;
+	theta := theta - (0.5)*3.14159;
+	IF theta < 0 THEN
+		theta := theta + 2*3.14159;
+	END_IF
+	m_provisionals[5] := theta;
+END_IF
+
+]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="rotation" Id="{b132d22d-0448-482b-8abe-bed4a151b014}">
+      <Declaration><![CDATA[PROPERTY rotation : LREAL]]></Declaration>
+      <Get Name="Get" Id="{78e30bef-7bcf-4ed7-a64a-e74a86d1960b}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[rotation := m_provisionals[5];
+
+(*
+m_provisionals[1] := _centrex;
+m_provisionals[2] := _centrey;
+m_provisionals[3] := _major;
+m_provisionals[4] := _minor;
+m_provisionals[5] := _rotation;
+*)]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Method Name="Transpose" Id="{3bfcd51e-e9cf-4a82-8908-6fc92e918c80}">
+      <Declaration><![CDATA[METHOD Transpose : BOOL
+VAR_INPUT
+	ptrMatrix		: POINTER TO ARRAY[1..5,1..5] OF LREAL;
+	ptrTranspose	: POINTER TO ARRAY[1..5,1..5] OF LREAL;
+END_VAR
+VAR
+	i				: INT;
+	j				: INT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[FOR i := 1 TO 5 DO
+	FOR j := 1 TO 5 DO
+		ptrTranspose^[j,i] := ptrMatrix^[i,j];
+	END_FOR
+END_FOR]]></ST>
+      </Implementation>
+    </Method>
+    <LineIds Name="FB_Ellipse">
+      <LineId Id="9" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ellipse.AddObservation">
+      <LineId Id="16" Count="3" />
+      <LineId Id="5" Count="0" />
+      <LineId Id="9" Count="0" />
+      <LineId Id="11" Count="0" />
+      <LineId Id="20" Count="11" />
+      <LineId Id="10" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ellipse.centrex.Get">
+      <LineId Id="2" Count="0" />
+      <LineId Id="6" Count="0" />
+      <LineId Id="5" Count="0" />
+      <LineId Id="8" Count="3" />
+      <LineId Id="7" Count="0" />
+      <LineId Id="12" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ellipse.centrey.Get">
+      <LineId Id="2" Count="0" />
+      <LineId Id="8" Count="0" />
+      <LineId Id="7" Count="0" />
+      <LineId Id="10" Count="3" />
+      <LineId Id="9" Count="0" />
+      <LineId Id="14" Count="0" />
+      <LineId Id="6" Count="0" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ellipse.Cofactor">
+      <LineId Id="5" Count="0" />
+      <LineId Id="17" Count="0" />
+      <LineId Id="44" Count="0" />
+      <LineId Id="18" Count="0" />
+      <LineId Id="24" Count="1" />
+      <LineId Id="30" Count="1" />
+      <LineId Id="28" Count="0" />
+      <LineId Id="26" Count="0" />
+      <LineId Id="32" Count="0" />
+      <LineId Id="21" Count="0" />
+      <LineId Id="19" Count="0" />
+      <LineId Id="34" Count="0" />
+      <LineId Id="33" Count="0" />
+      <LineId Id="38" Count="2" />
+      <LineId Id="37" Count="0" />
+      <LineId Id="45" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ellipse.Compute">
+      <LineId Id="5" Count="0" />
+      <LineId Id="11" Count="0" />
+      <LineId Id="10" Count="0" />
+      <LineId Id="50" Count="1" />
+      <LineId Id="16" Count="0" />
+      <LineId Id="15" Count="0" />
+      <LineId Id="18" Count="0" />
+      <LineId Id="17" Count="0" />
+      <LineId Id="21" Count="0" />
+      <LineId Id="23" Count="1" />
+      <LineId Id="26" Count="1" />
+      <LineId Id="52" Count="0" />
+      <LineId Id="28" Count="2" />
+      <LineId Id="53" Count="0" />
+      <LineId Id="31" Count="3" />
+      <LineId Id="36" Count="0" />
+      <LineId Id="35" Count="0" />
+      <LineId Id="20" Count="0" />
+      <LineId Id="38" Count="0" />
+      <LineId Id="37" Count="0" />
+      <LineId Id="39" Count="1" />
+      <LineId Id="42" Count="3" />
+      <LineId Id="41" Count="0" />
+      <LineId Id="47" Count="0" />
+      <LineId Id="46" Count="0" />
+      <LineId Id="13" Count="0" />
+      <LineId Id="12" Count="0" />
+      <LineId Id="6" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ellipse.Determinant4x4">
+      <LineId Id="254" Count="47" />
+      <LineId Id="189" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ellipse.Determinant5x5">
+      <LineId Id="110" Count="1" />
+      <LineId Id="184" Count="0" />
+      <LineId Id="200" Count="0" />
+      <LineId Id="214" Count="0" />
+      <LineId Id="201" Count="0" />
+      <LineId Id="203" Count="0" />
+      <LineId Id="205" Count="0" />
+      <LineId Id="213" Count="0" />
+      <LineId Id="207" Count="0" />
+      <LineId Id="206" Count="0" />
+      <LineId Id="204" Count="0" />
+      <LineId Id="208" Count="0" />
+      <LineId Id="215" Count="0" />
+      <LineId Id="209" Count="1" />
+      <LineId Id="219" Count="1" />
+      <LineId Id="211" Count="0" />
+      <LineId Id="221" Count="2" />
+      <LineId Id="225" Count="0" />
+      <LineId Id="224" Count="0" />
+      <LineId Id="216" Count="0" />
+      <LineId Id="202" Count="0" />
+      <LineId Id="217" Count="0" />
+      <LineId Id="113" Count="10" />
+      <LineId Id="227" Count="0" />
+      <LineId Id="226" Count="0" />
+      <LineId Id="228" Count="2" />
+      <LineId Id="232" Count="0" />
+      <LineId Id="231" Count="0" />
+      <LineId Id="233" Count="2" />
+      <LineId Id="189" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ellipse.EllipseFit">
+      <LineId Id="18" Count="1" />
+      <LineId Id="8" Count="0" />
+      <LineId Id="13" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ellipse.ErrorAnalysis">
+      <LineId Id="5" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ellipse.EvaluateAdjustedUnknowns">
+      <LineId Id="5" Count="0" />
+      <LineId Id="9" Count="1" />
+    </LineIds>
+    <LineIds Name="FB_Ellipse.EvaluateResiduals">
+      <LineId Id="5" Count="0" />
+      <LineId Id="11" Count="0" />
+      <LineId Id="10" Count="0" />
+      <LineId Id="12" Count="0" />
+      <LineId Id="15" Count="3" />
+      <LineId Id="13" Count="0" />
+      <LineId Id="20" Count="0" />
+      <LineId Id="19" Count="0" />
+      <LineId Id="21" Count="1" />
+      <LineId Id="6" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ellipse.EvaluateUnknowns">
+      <LineId Id="107" Count="22" />
+      <LineId Id="181" Count="0" />
+      <LineId Id="131" Count="11" />
+      <LineId Id="180" Count="0" />
+      <LineId Id="144" Count="29" />
+      <LineId Id="179" Count="0" />
+      <LineId Id="178" Count="0" />
+      <LineId Id="177" Count="0" />
+      <LineId Id="174" Count="2" />
+      <LineId Id="20" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ellipse.FormulateMatrices">
+      <LineId Id="13" Count="0" />
+      <LineId Id="31" Count="2" />
+      <LineId Id="35" Count="0" />
+      <LineId Id="34" Count="0" />
+      <LineId Id="36" Count="2" />
+      <LineId Id="40" Count="0" />
+      <LineId Id="39" Count="0" />
+      <LineId Id="41" Count="0" />
+      <LineId Id="43" Count="0" />
+      <LineId Id="46" Count="1" />
+      <LineId Id="52" Count="11" />
+      <LineId Id="42" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ellipse.GenerateProvisionals">
+      <LineId Id="19" Count="0" />
+      <LineId Id="22" Count="4" />
+      <LineId Id="28" Count="3" />
+      <LineId Id="27" Count="0" />
+      <LineId Id="32" Count="0" />
+      <LineId Id="21" Count="0" />
+      <LineId Id="9" Count="1" />
+      <LineId Id="16" Count="2" />
+    </LineIds>
+    <LineIds Name="FB_Ellipse.HasConverged">
+      <LineId Id="13" Count="0" />
+      <LineId Id="5" Count="0" />
+      <LineId Id="9" Count="0" />
+      <LineId Id="11" Count="1" />
+      <LineId Id="10" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ellipse.Inverse">
+      <LineId Id="60" Count="0" />
+      <LineId Id="11" Count="0" />
+      <LineId Id="26" Count="0" />
+      <LineId Id="21" Count="1" />
+      <LineId Id="61" Count="0" />
+      <LineId Id="30" Count="0" />
+      <LineId Id="32" Count="0" />
+      <LineId Id="34" Count="0" />
+      <LineId Id="33" Count="0" />
+      <LineId Id="31" Count="0" />
+      <LineId Id="25" Count="0" />
+      <LineId Id="23" Count="0" />
+      <LineId Id="58" Count="0" />
+      <LineId Id="35" Count="2" />
+      <LineId Id="39" Count="0" />
+      <LineId Id="41" Count="0" />
+      <LineId Id="43" Count="0" />
+      <LineId Id="45" Count="2" />
+      <LineId Id="44" Count="0" />
+      <LineId Id="48" Count="1" />
+      <LineId Id="42" Count="0" />
+      <LineId Id="50" Count="2" />
+      <LineId Id="59" Count="0" />
+      <LineId Id="53" Count="1" />
+      <LineId Id="56" Count="1" />
+      <LineId Id="55" Count="0" />
+      <LineId Id="17" Count="1" />
+      <LineId Id="13" Count="1" />
+      <LineId Id="12" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ellipse.IsDegenerate">
+      <LineId Id="5" Count="1" />
+    </LineIds>
+    <LineIds Name="FB_Ellipse.major.Get">
+      <LineId Id="12" Count="0" />
+      <LineId Id="5" Count="0" />
+      <LineId Id="2" Count="0" />
+      <LineId Id="7" Count="3" />
+      <LineId Id="6" Count="0" />
+      <LineId Id="11" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ellipse.minor.Get">
+      <LineId Id="5" Count="1" />
+      <LineId Id="2" Count="0" />
+      <LineId Id="8" Count="3" />
+      <LineId Id="7" Count="0" />
+      <LineId Id="12" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ellipse.NormalizeAdjustedUnknowns">
+      <LineId Id="5" Count="0" />
+      <LineId Id="9" Count="0" />
+      <LineId Id="11" Count="0" />
+      <LineId Id="10" Count="0" />
+      <LineId Id="13" Count="2" />
+      <LineId Id="17" Count="0" />
+      <LineId Id="16" Count="0" />
+      <LineId Id="21" Count="2" />
+      <LineId Id="25" Count="5" />
+      <LineId Id="24" Count="0" />
+      <LineId Id="18" Count="0" />
+      <LineId Id="12" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ellipse.rotation.Get">
+      <LineId Id="5" Count="1" />
+      <LineId Id="2" Count="0" />
+      <LineId Id="8" Count="3" />
+      <LineId Id="7" Count="0" />
+      <LineId Id="12" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Ellipse.Transpose">
+      <LineId Id="5" Count="0" />
+      <LineId Id="12" Count="0" />
+      <LineId Id="14" Count="1" />
+      <LineId Id="13" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

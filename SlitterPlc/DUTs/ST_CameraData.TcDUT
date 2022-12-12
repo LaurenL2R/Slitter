@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.9">
+  <DUT Name="ST_CameraData" Id="{941eca32-b1aa-4f17-89b6-6939c90deac4}">
+    <Declaration><![CDATA[TYPE ST_CameraData :
+STRUCT
+	CurrentJobID			: WORD;
+	ErrorCode				: WORD;
+	AcquisitionID			: WORD;
+	InspectionID			: WORD;
+	InspectionResultCode	: WORD;
+	Results					: ST_CameraResults;
+END_STRUCT
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

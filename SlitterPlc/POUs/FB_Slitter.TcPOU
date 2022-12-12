@@ -1,0 +1,2288 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.9">
+  <POU Name="FB_Slitter" Id="{7a328348-b5d6-4092-afea-9c5e83fda193}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Slitter EXTENDS FB_BASE IMPLEMENTS I_UnitState
+VAR_INPUT
+	Batch		: ULINT;
+	Inspect		: BOOL;					// run routine without cut; just inspect
+	InspectCmd	: ST_InspectCommands;
+	TubeHmi		: ST_TubeParameters;	// used for manual commands
+END_VAR
+VAR_IN_OUT
+	Tube		: ST_TubeParameters;
+END_VAR
+VAR_OUTPUT 
+	FilesLoaded		: BOOL;
+	BatchOut		: ULINT;
+	CounterOut		: ULINT;
+	CountFailedOut	: UINT;
+	Status			: INT; 	// 0 = idle, 1 = processing, 2 = pass, 3 = fail, 4 = no detect
+END_VAR
+VAR
+	Mandrel				: FB_Mandrel;
+	MandrelParameters	: ST_MandrelParameters;
+	Camera				: FB_Camera;
+	CameraParameters	: ST_CameraParameters;
+	Cutter				: FB_Cutter;
+	CutterParameters 	: ST_CutterParameters;
+	Ejector				: FB_Ejector;
+	EjectorParameters	: ST_EjectorParameters;
+	EjectState			: INT;
+	Eject				: BOOL;
+	
+	Manual		: ST_ManualCommands;
+	bBusy		: BOOL;	
+	bCalibration: BOOL;
+	strJobName	: STRING;	// for manual override of which camera program is used
+	nIndex		: INT;
+	PreviousTubeIndex	: INT;
+	fbFileOpen	: FB_FileOpen;
+	fbFileWrite	: FB_FileWrite;
+	fbFileClose	: FB_FileClose;
+	fbLocalSystemTime	: FB_LocalSystemTime;
+	bDecrementSpindle: BOOL;
+	bIncrementSpindle: BOOL;
+	bInspect: BOOL;
+	bInspectComplete: BOOL;
+	nCalibrationCounter : INT;
+	CalibrationArrayX	: ARRAY[0..CalMax] OF LREAL;
+	CalibrationArrayY	: ARRAY[0..CalMax] OF LREAL;
+	AverageX 			: LREAL;
+	AverageY 			: LREAL;
+	
+	fbXmlSrvRead		: FB_XmlSrvRead;
+	fbXmlSrvWrite		: FB_XmlSrvWrite;
+
+	fbMessageSaved		: FB_TcMessage;
+		
+END_VAR
+VAR CONSTANT
+	CalMax	: INT := 9;
+END_VAR
+VAR PERSISTENT
+	Counter		: UINT;
+	CountFailed	: UINT;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[
+SUPER^();
+
+IF eState <> E_PMLState.ePMLState_Undefined THEN
+	Mandrel.MonitorParameters();
+	Camera.MonitorParameters();
+	Cutter.MonitorParameters();
+	Ejector.MonitorParameters();
+END_IF
+
+Mandrel.ConvertVaccum();
+Mandrel.TubeParameters := Tube;
+
+IF Batch <> BatchOut THEN
+	BatchOut := Batch;
+	Counter := 0;
+	CountFailed := 0;
+END_IF
+
+CounterOut := Counter;
+CountFailedOut := CountFailed;
+
+Camera.TubeParameters := Tube;
+
+CASE eState OF
+	E_PMLState.ePMLState_Idle: Status := 0;
+	E_PMLState.ePMLState_Starting: Status := 1;
+	(* put in executing to get fast answer - don't wait for execute to finish
+	E_PMLState.ePMLState_Completing:
+		IF Camera.Pass THEN
+			Status := 2;
+		ELSIF Camera.Fail THEN
+			Status := 3;
+		ELSIF ...
+			Status := 4;
+		END_IF
+	*)
+END_CASE
+
+]]></ST>
+    </Implementation>
+    <Method Name="FB_init" Id="{2695ce36-1c8e-4247-8301-5f66a071e9eb}">
+      <Declaration><![CDATA[METHOD FB_init : BOOL
+VAR_INPUT
+	bInitRetains : BOOL; // if TRUE, the retain variables are initialized (warm start / cold start)
+	bInCopyCode : BOOL;  // if TRUE, the instance afterwards gets moved into the copy code (online change)
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF NOT fbMessageSaved.EqualsToEventEntryEx(stOther := TC_EVENTS.SlitterEvents.ParametersSaved) THEN
+	fbMessageSaved.CreateEx(TC_EVENTS.SlitterEvents.ParametersSaved, 0);
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Aborting" Id="{90e7533a-87d1-4811-b79c-2aa2f3c4341d}">
+      <Declaration><![CDATA[METHOD M_Aborting
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[M_StateComplete();
+
+bBusy := FALSE;
+bCalibration := FALSE;
+Cutter.Abort();
+Ejector.Abort();
+Mandrel.Abort();
+M_CalibrateCamera(Execute := FALSE);
+Eject := FALSE;
+EjectState := 0;
+nCalibrationCounter := 0;
+
+Manual.bCameraCalibrate := FALSE;
+Manual.bCameraComputePeak := FALSE;
+Manual.bCameraInspect := FALSE;
+Manual.bCameraRawData := FALSE;
+Manual.bCameraTrigger := FALSE;
+Manual.bCutSample := FALSE;
+Manual.bCutterDisable := FALSE;
+Manual.bCutterHome := FALSE;
+Manual.bCutterMoveAbs := FALSE;
+Manual.bCutterReset := FALSE;
+Manual.bEjectAxisEnableToggle := FALSE;
+Manual.bEjectAxisFailPosition := FALSE;
+Manual.bEjectAxisHomePosition := FALSE;
+Manual.bEjectAxisPassPosition := FALSE;
+Manual.bEjectAxisReset := FALSE;
+Manual.bEjectBlowOff := FALSE;
+Manual.bEjectReset := FALSE;
+Manual.bEjectSamplePass := FALSE;
+Manual.bEjectSampleFail := FALSE;
+Manual.bEjectVacuum := FALSE;
+Manual.bEjectZExtend := FALSE;
+Manual.bEjectZNeutral := FALSE;
+Manual.bEjectZOff := FALSE;
+Manual.bEjectZRetract := FALSE;
+Manual.bLowerMandrel := FALSE;
+Manual.bMandrelReset := FALSE;
+Manual.bMandrelSpindleRotate := FALSE;
+Manual.bMandrelSpindleToggle := FALSE;
+Manual.bMandrelXEnableToggle := FALSE;
+Manual.bMandrelYEnableToggle := FALSE;
+Manual.bMoveToCutPosition := FALSE;
+Manual.bMoveToEjectPosition := FALSE;
+Manual.bMoveToInspectPosition := FALSE;
+Manual.bMoveToLoadPosition := FALSE;
+Manual.bRaiseMandrel := FALSE;
+Manual.bSaveMandrelParameters := FALSE;
+Manual.bToggleMandrelVacuum := FALSE;
+Manual.bVacuumAxisToggleEnable := FALSE;
+Manual.bVacuumAxisMove := FALSE;
+Manual.bVacuumAxisReset := FALSE;
+
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_CalibrateCamera" Id="{50d870bc-07ae-4823-b6bc-a44278d18a58}">
+      <Declaration><![CDATA[METHOD M_CalibrateCamera : INT;
+VAR_INPUT
+	Execute			: BOOL;
+END_VAR
+VAR_INST
+	rTrig			: R_TRIG;
+	nIndex			: INT;
+	Position		: LREAL;
+	debug			: INT;
+	debug1			: INT;
+	debug2			: INT;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	nIndex := 10;
+	Mandrel.MoveToInspectPosition(Execute := FALSE, InspectPositionX := Tube.InspectPositionX, InspectPositionY := Tube.InspectPositionY);
+	Mandrel.MoveToLoadPosition(Execute := FALSE);
+	Mandrel.MoveXAbs(Execute := FALSE, Position := 0);
+	Mandrel.MoveYAbs(Execute := FALSE, Position := 0);
+	Camera.TriggerCamera(Execute := FALSE);
+	bCalibration := TRUE;
+END_IF
+
+IF NOT Execute THEN
+	debug := debug + 1;
+	nIndex := 0;
+END_IF
+
+CASE nIndex OF
+	0: // idle state
+		M_CalibrateCamera := 0;
+		bCalibration := FALSE;
+	10: // move to first inspection position
+		IF Mandrel.MoveToInspectPosition(Execute := TRUE, InspectPositionX := Tube.InspectPositionX, InspectPositionY := Tube.InspectPositionY) = 1 THEN
+			Mandrel.MoveToInspectPosition(Execute := FALSE, InspectPositionX := Tube.InspectPositionX, InspectPositionY := Tube.InspectPositionY);
+			nIndex := 20;
+		ELSIF Mandrel.MoveToInspectPosition(Execute := TRUE, InspectPositionX := Tube.InspectPositionX, InspectPositionY := Tube.InspectPositionY) = -1 THEN
+			Mandrel.MoveToInspectPosition(Execute := FALSE, InspectPositionX := Tube.InspectPositionX, InspectPositionY := Tube.InspectPositionY);
+			nIndex := 100;
+		END_IF
+	20: // trigger the camera
+		IF Camera.TriggerCamera(Execute := TRUE) THEN
+			Camera.PatternX1 := Camera.PatternMatchX;
+			Camera.PatternY1 := Camera.PatternMatchY;
+			Camera.TriggerCamera(Execute := FALSE);
+			nIndex := 30;
+		END_IF
+	30: // move to second position in x
+		Position := Tube.InspectPositionX + Camera.CalibrationDistance; 
+		IF Mandrel.MoveXAbs(Execute := TRUE, Position := Position) = 1 THEN
+			Mandrel.MoveXAbs(Execute := FALSE, Position := Position);
+			nIndex := 40;
+		ELSIF Mandrel.MoveXAbs(Execute := TRUE, Position := Position) = -1 THEN
+			Mandrel.MoveXAbs(Execute := FALSE, Position := Position);
+			nIndex := 100;
+		END_IF
+	40: // trigger the camera
+		IF Camera.TriggerCamera(Execute := TRUE) THEN
+			Camera.PatternX2 := Camera.PatternMatchX;
+			Camera.PatternY2 := Camera.PatternMatchY;
+			Camera.TriggerCamera(Execute := FALSE);
+			nIndex := 50;
+		END_IF
+	45: // 
+		Mandrel.MoveYAbs(Execute := FALSE, Position := 0);
+		nIndex := 50;
+	50: // move to the third position in y
+		Position := Tube.InspectPositionY + Camera.CalibrationDistance; 
+		IF Mandrel.MoveYAbs(Execute := TRUE, Position := Position) = 1 THEN
+			Mandrel.MoveYAbs(Execute := FALSE, Position := Position);
+			nIndex := 60;
+		ELSIF Mandrel.MoveYAbs(Execute := TRUE, Position := Position) = -1 THEN
+			Mandrel.MoveYAbs(Execute := FALSE, Position := Position);
+			nIndex := 100;
+		END_IF
+	60: // trigger camera
+		IF Camera.TriggerCamera(Execute := TRUE) THEN
+			Camera.PatternX3 := Camera.PatternMatchX;
+			Camera.PatternY3 := Camera.PatternMatchY;
+			Camera.TriggerCamera(Execute := FALSE);
+			nIndex := 70;
+		END_IF
+	70: // Calculate the pitch
+		Camera.Calibrate();
+		nIndex := 80; 
+	80: // return to load position	
+		IF Mandrel.MoveToLoadPosition(Execute := TRUE) <> 0 THEN
+			Mandrel.MoveToLoadPosition(Execute := FALSE);
+			nIndex := 90;
+		END_IF
+	90: // done state
+		M_CalibrateCamera := 1;
+	 
+	100: // error state
+		M_CalibrateCamera := -1;
+	
+END_CASE]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Clearing" Id="{7c5bba32-1fea-4eeb-a679-abf5c99e3b65}">
+      <Declaration><![CDATA[METHOD M_Clearing
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[CASE eMode OF
+	E_PMLProtectedUnitMode.ePMLProtUnitMode_Manual: M_ClearingManual();
+	
+	E_PMLProtectedUnitMode.ePMLProtUnitMode_Production: M_ClearingProduction();
+END_CASE
+
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ClearingManual" Id="{9afeb0de-b6ab-4a5c-b456-a2485d73aad8}">
+      <Declaration><![CDATA[METHOD M_ClearingManual : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[M_StateComplete();
+//M_ClearingManual := TRUE;]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_ClearingProduction" Id="{3443b4f9-432d-4c09-b717-0b592de4ed69}">
+      <Declaration><![CDATA[METHOD M_ClearingProduction : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[CASE nState OF
+	0:	// reset the variables
+		Mandrel.Clear(Execute := FALSE);
+		Cutter.Clear(Execute := FALSE);
+		Ejector.Reset(Execute := FALSE);
+		nState := 10;
+	10: // reset the cutter
+		IF Cutter.Clear(Execute := TRUE) = 1 THEN
+			Cutter.Clear(Execute := FALSE);
+			nState := 20;
+		END_IF	
+	20: // reset the ejector
+		IF Ejector.Reset(Execute := TRUE) = 1 THEN
+			Ejector.Reset(Execute := FALSE);
+			nState := 30;		END_IF
+
+	30: // reset the different objects
+		IF Mandrel.Clear(Execute := TRUE) = 1 THEN
+			Mandrel.Clear(Execute := FALSE);
+			nState := 40;
+		END_IF
+	40:	// done state
+		M_StateComplete();
+END_CASE]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Complete" Id="{1780f499-3e0b-4183-b06b-22e95e7c1e40}">
+      <Declaration><![CDATA[
+METHOD M_Complete
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Completing" Id="{a80dec61-c324-4326-8412-9c8115affa7f}">
+      <Declaration><![CDATA[METHOD M_Completing
+
+VAR
+	EjectSample: INT;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF eMode = E_PMLProtectedUnitMode.ePMLProtUnitMode_Production THEN
+	CASE EjectState OF
+		0: // wait for eject command
+			M_StateComplete();
+		10: // execute the eject pass sequence
+			EjectSample := Ejector.EjectSamplePass(Execute := TRUE);
+			IF EjectSample = 1 THEN
+				Eject := FALSE;
+				Ejector.EjectSamplePass(Execute := FALSE);
+				EjectState := 0;
+			ELSIF EjectSample = -1 THEN
+				Eject := FALSE;
+				EjectState := 0;
+				Ejector.EjectSamplePass(Execute := FALSE);
+			END_IF
+		20: // execute the eject fail sequence
+			EjectSample := Ejector.EjectSampleFail(Execute := TRUE);
+			IF EjectSample = 1 THEN
+				Eject := FALSE;
+				Ejector.EjectSampleFail(Execute := FALSE);
+				EjectState := 0;
+			ELSIF EjectSample = -1 THEN
+				Eject := FALSE;
+				EjectState := 0;
+				Ejector.EjectSampleFail(Execute := FALSE);
+			END_IF
+	END_CASE
+ELSE
+	M_StateComplete();
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Execute" Id="{5a27d0f0-b578-4f5d-82aa-9f6a44f47776}">
+      <Declaration><![CDATA[METHOD M_Execute
+VAR_INST
+	Result					: INT;
+END_VAR
+VAR
+	CutPositionY 			: LREAL;
+	VelocityY 				: LREAL;
+	MoveToCutPosition 		: INT;
+	MoveToInspectPosition 	: INT;
+	MoveToEjectPosition 	: INT;
+	MoveToLoadPosition 		: INT;
+	CutSample				: INT;
+	EjectSample 			: INT;
+
+	CameraIndex 			: INT;
+	FileName				: STRING;
+	FilePath				: STRING;
+	RotateDistance			: LREAL;
+END_VAR
+VAR_INST
+	StrResult				: STRING(255);
+	SampleLowered			: BOOL;
+	LiftTon					: TON := (PT := T#500MS);
+	VacuumSensorTON			: TON := (PT := T#2S);
+	hFile					: UINT;
+	AttemptCounter			: INT;
+	Pass					: BOOL;
+	Message					: STRING(255);
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[Eject := FALSE;
+fbLocalSystemTime(
+	sNetId := '',
+	bEnable := TRUE,
+	dwCycle := 1);
+
+IF eMode = E_PMLProtectedUnitMode.ePMLProtUnitMode_Production THEN
+	CASE nState OF
+		0: // do we need to write to the camera?
+			AttemptCounter := 0;
+			bDecrementSpindle:= FALSE;
+			bIncrementSpindle:= FALSE;
+			bInspect:= FALSE;
+			bInspectComplete:= FALSE;
+
+			SampleLowered := FALSE;
+			VacuumSensorTON(IN := FALSE);
+			Result := Camera.SelectCameraProgram(Execute := TRUE);
+			IF Result = 1 THEN
+				Camera.SelectCameraProgram(Execute := FALSE);
+				nState := 5;
+			ELSIF Result = -1 THEN
+				Camera.SelectCameraProgram(Execute := FALSE);
+				Message := 'Camera failed to read/write to modbus.';
+				nState := 666;
+			END_IF
+		5: // move the vacuum axis to the correct location
+			IF Mandrel.MoveToVacPosition(Execute := TRUE) THEN
+				Mandrel.MoveToVacPosition(Execute := FALSE);
+				nState := 10;
+			END_IF
+		10: // turn on mandrel vacuum and move to cut position
+			Mandrel.MandrelVacuum := TRUE;
+			IF Mandrel.LowerSample() = 1 THEN
+				SampleLowered := TRUE;
+				nState := 11;
+			END_IF
+		11: // wait for vacuum sensor to detect the tube
+			VacuumSensorTON(IN := TRUE);
+			IF Mandrel.VacuumSensor > Tube.VacuumThreshold THEN
+				nState := 15;
+				VacuumSensorTON(IN := FALSE);
+			END_IF
+			IF VacuumSensorTON.Q THEN
+				Mandrel.MandrelVacuum := FALSE;
+				nState := 110;
+				VacuumSensorTON(IN := FALSE);
+			END_IF
+		15: // move to cut position
+			MoveToCutPosition := Mandrel.MoveToCutPosition(Execute := TRUE, CutPositionX := Tube.CutPositionX, CutPositionY := Tube.CutPositionY);
+			IF MoveToCutPosition = 1 AND SampleLowered THEN
+				Mandrel.MoveToCutPosition(Execute := FALSE, CutPositionX := Tube.CutPositionX, CutPositionY := Tube.CutPositionY);
+				nState := 20;
+				SampleLowered := FALSE;
+			ELSIF MoveToCutPosition = -1 THEN
+				Mandrel.MoveToCutPosition(Execute := FALSE, CutPositionX := Tube.CutPositionX, CutPositionY := Tube.CutPositionY);
+				nState := 666;
+				Message := 'Mandrel failed to move.';
+				SampleLowered := FALSE;
+			END_IF
+		20: // make a cut unless we are just inspecting
+			IF Inspect THEN
+				nState := 30;
+			ELSE
+				CutSample := Cutter.CutSample(Execute := TRUE);
+				IF CutSample = 1 THEN
+					Cutter.CutSample(Execute := FALSE);
+					nState := 30;
+				ELSIF CutSample = -1 THEN
+					Cutter.CutSample(Execute := FALSE);
+					nState := 666;
+				END_IF
+			END_IF
+		30: // raise sample
+			// move to inspect position
+			Mandrel.LiftSample();
+			MoveToInspectPosition := Mandrel.MoveToInspectPosition(Execute := TRUE, InspectPositionX := Tube.InspectPositionX, InspectPositionY := Tube.InspectPositionY);
+			IF MoveToInspectPosition = 1 THEN
+				Mandrel.MoveToInspectPosition(Execute := FALSE, InspectPositionX := Tube.InspectPositionX, InspectPositionY := Tube.InspectPositionY);
+				nState := 35;
+			ELSIF MoveToInspectPosition = -1 THEN
+				Mandrel.MoveToInspectPosition(Execute := FALSE, InspectPositionX := Tube.InspectPositionX, InspectPositionY := Tube.InspectPositionY);
+				nState := 666;
+			END_IF
+		35: // add 500 ms delay for lifter
+			LiftTON.IN := TRUE;
+			IF LiftTON.Q THEN
+				LiftTON.IN := FALSE;
+				IF Inspect THEN
+					nState := 36;
+				ELSE
+					nState := 40;
+				END_IF
+			END_IF
+			LiftTON();
+		36: // Inspect under manual control
+			Result := Camera.Inspect(Execute := TRUE);
+			IF Result = 1 THEN
+				nState := 37;
+				Camera.Inspect(Execute := FALSE);
+				IF Camera.Pass THEN
+					Status := 2;
+				ELSE
+					Status := 3;
+				END_IF
+			ELSIF Result = -1 THEN
+				Status := 4;
+				nState := 37;
+			END_IF
+			//nState := 37;
+		37: // wait for command
+			IF bDecrementSpindle THEN
+				bDecrementSpindle := FALSE;
+				nState := 39;
+			ELSIF bIncrementSpindle THEN
+				bIncrementSpindle := FALSE;
+				nState := 38;
+			ELSIF bInspect THEN
+				bInspect := FALSE;
+				nState := 36;
+			ELSIF bInspectComplete THEN
+				bInspectComplete := FALSE;
+				nState := 70;
+			END_IF
+		38: // increment spindle
+			IF Mandrel.RotateSpindle(Execute := TRUE, Distance := Mandrel.SpindleIncrement ) <> 0 THEN
+				Mandrel.RotateSpindle(Execute := FALSE, Distance := Mandrel.SpindleIncrement);
+				nState := 37;
+			END_IF
+		39: // decrement spindle
+			IF Mandrel.RotateSpindle(Execute := TRUE, Distance := -1 * Mandrel.SpindleIncrement) <> 0 THEN
+				Mandrel.RotateSpindle(Execute := FALSE, Distance := -1 * Mandrel.SpindleIncrement);
+				nState := 37;
+			END_IF
+			
+		40: // inspect
+			Result := Camera.Inspect(Execute := TRUE);
+			IF Result = 1 THEN
+				Camera.Inspect(Execute := FALSE);
+				IF Camera.Pass THEN
+					Mandrel.MandrelVacuum := FALSE;
+					IF Manual.bCalibrateMandrel THEN
+						CalibrationArrayX[nCalibrationCounter] := Camera.DeltaXmmWithOffset;
+						CalibrationArrayY[nCalibrationCounter] := Camera.DeltaYmmWithOffset;
+						nCalibrationCounter := nCalibrationCounter + 1;
+						IF nCalibrationCounter > CalMax THEN
+							MandrelCalibration();
+							Manual.bCalibrateMandrel := FALSE;
+							nCalibrationCounter := 0;
+						END_IF
+					END_IF
+					Pass := TRUE;
+					nState := 50;	// passed -> go to eject pass station
+					Status := 2;
+				ELSE
+					Mandrel.MandrelVacuum := FALSE;
+					Pass := FALSE;
+					nState := 50;	// failed -> go to eject fail station
+					Status := 3;
+				END_IF
+			ELSIF Result = -1 THEN	// couldn't find the pattern; need to advance the counter and retry
+				AttemptCounter := AttemptCounter + 1;
+				Camera.Inspect(Execute := FALSE);
+				IF AttemptCounter > 3 THEN	// error
+					nState := 70;			// error out
+					Status := 4;
+				ELSE						// advance the motor a bit and retry
+					nState := 45;
+				END_IF
+			END_IF
+		45: // advance the tube a bit and then go and retry the process
+			Result := Mandrel.MoveXRel(Execute := TRUE, Distance := 1);
+			IF Result = 1 THEN
+				Mandrel.MoveXRel(Execute := FALSE, Distance := 1);
+				nState := 35;
+			END_IF
+			
+		50: // move to eject position		
+			MoveToEjectPosition := Mandrel.MoveToEjectPosition(Execute := TRUE, EjectPositionX := Tube.EjectPositionX, EjectPositionY := Tube.EjectPositionY);
+			IF MoveToEjectPosition = 1 THEN
+				Mandrel.MoveToEjectPosition(Execute := FALSE, EjectPositionX := Tube.EjectPositionX, EjectPositionY := Tube.EjectPositionY);
+				nState := 60;
+			ELSIF MoveToEjectPosition = -1 THEN
+				Mandrel.MoveToEjectPosition(Execute := FALSE, EjectPositionX := Tube.EjectPositionX, EjectPositionY := Tube.EjectPositionY);
+				nState := 666;
+			END_IF
+		60: // do the eject sequence 
+			Eject := TRUE;		
+			// wait for the system to retract
+			IF Ejector.IsEjectZExtend THEN
+				nState := 65;
+			END_IF
+		65: // wait for ejector actuator to be clear to retract the mandrel
+			IF Ejector.IsEjectZRetract THEN
+				nState := 70;
+			END_IF 
+		70: // move to load position
+			Mandrel.MandrelVacuum := FALSE;
+
+			IF Mandrel.LowerSample() = 1 THEN
+				SampleLowered := TRUE;
+			END_IF
+			IF Manual.bCalibrateMandrel THEN
+				IF Mandrel.SpindleOffset >= 0 THEN
+					RotateDistance := (360.0 / (INT_TO_LREAL(CalMax)+1.0)) - Mandrel.SpindleOffset;
+				ELSE
+					RotateDistance := -1 * ( (360.0 / (INT_TO_LREAL(CalMax)+1.0)) + Mandrel.SpindleOffset);
+				END_IF
+				IF Mandrel.RotateSpindle(Execute := TRUE, Distance := RotateDistance) <> 0 THEN
+					Mandrel.RotateSpindle(Execute := FALSE, Distance := RotateDistance);
+					nState := 75;
+				END_IF
+			ELSE
+				nState := 75;			
+			END_IF
+		75: // move to load position cont'd
+			IF Mandrel.LowerSample() = 1 THEN
+				SampleLowered := TRUE;
+			END_IF
+
+			MoveToLoadPosition := Mandrel.MoveToLoadPosition(Execute := TRUE);
+			IF MoveToLoadPosition = 1 AND SampleLowered THEN
+				Mandrel.MoveToLoadPosition(Execute := FALSE);
+				SampleLowered := FALSE;
+				nState := 80;
+			ELSIF MoveToLoadPosition = -1 THEN
+				SampleLowered := FALSE;
+				Mandrel.MoveToLoadPosition(Execute := FALSE);
+				nState := 666;
+			END_IF
+		80: // check if vacuum is off
+			IF Mandrel.VacuumSensor < Tube.VacuumThreshold THEN
+				nState := 90;
+				Mandrel.MandrelVacuum := FALSE;
+			END_IF
+		90:	// increment counters state
+			IF NOT Inspect THEN			
+				Counter := Counter + 1;
+				IF NOT Camera.Pass THEN
+					CountFailed := CountFailed + 1;
+				END_IF
+				nState := 100;
+			ELSE
+				nState := 110;
+			END_IF			
+		100: // save to file
+			FileName := CONCAT(ULINT_TO_STRING(Batch), '.txt');
+			FilePath := CONCAT('D:\',FileName);
+			fbFileOpen(
+				sNetId := '',
+				sPathName := FilePath,
+				nMode := FOPEN_MODEAPPEND,
+				ePath := E_OpenPath.PATH_GENERIC,
+				hFile => hFile,
+				bExecute := TRUE);
+			IF NOT fbFileOpen.bBusy THEN
+				fbFileOpen(
+					sNetId := '',
+					sPathName := FilePath,
+					nMode := FOPEN_MODEAPPEND,
+					ePath := E_OpenPath.PATH_GENERIC,
+					bExecute := FALSE);
+				nState := 101;
+			END_IF
+			IF fbFileOpen.bError THEN
+				fbFileOpen(
+					sNetId := '',
+					sPathName := FilePath,
+					nMode := FOPEN_MODEAPPEND,
+					ePath := E_OpenPath.PATH_GENERIC,
+					bExecute := FALSE);
+				nState := 102;				
+			END_IF
+		101: // write data to file	
+			StrResult := '';		
+			StrResult := CONCAT(ULINT_TO_STRING(Batch), ', ');
+			StrResult := CONCAT(StrResult, UINT_TO_STRING(Counter));
+			StrResult := CONCAT(StrResult, ', ');
+			// add the system time
+			IF fbLocalSystemTime.bValid THEN
+				StrResult := CONCAT(StrResult, SYSTEMTIME_TO_STRING(fbLocalSystemTime.systemTime));
+				StrResult := CONCAT(StrResult, ', ');
+			END_IF
+			IF Camera.Pass THEN
+				StrResult := CONCAT(StrResult, 'PASS, ');
+			ELSIF Camera.Fail THEN
+				StrResult := CONCAT(StrResult, 'FAIL, ');
+			ELSIF Camera.NoDetect THEN
+				StrResult := CONCAT(StrResult, 'NO DETECT, ');
+			END_IF
+			IF NOT Camera.NoDetect THEN
+				StrResult := CONCAT(StrResult, 'x := ');
+				StrResult := CONCAT(StrResult, REAL_TO_STRING(Camera.DeltaXmmWithOffset));
+				StrResult := CONCAT(StrResult, ', y := ');
+				StrResult := CONCAT(StrResult, REAL_TO_STRING(Camera.DeltaYmmWithOffset));
+				StrResult := CONCAT(StrResult, ', length := ');
+				StrResult := CONCAT(StrResult, REAL_TO_STRING(Camera.CutLengthWithOffset));
+			ELSE
+				StrResult := CONCAT(StrResult, 'x := not detected');
+				StrResult := CONCAT(StrResult, ', y := not detected');
+				StrResult := CONCAT(StrResult, ', length := not detected');			
+			END_IF
+			StrResult := CONCAT(StrResult, '$r$n');
+			fbFileWrite(
+				sNetId := '',
+				hFile := hFile,
+				pWriteBuff := ADR(StrResult),
+				cbWriteLen := INT_TO_UINT(LEN(StrResult)),
+				bExecute := TRUE
+			);
+			IF NOT fbFileWrite.bBusy THEN
+				nState := 102;
+				fbFileWrite(bExecute := FALSE);
+			END_IF
+			IF fbFileWrite.bError THEN
+				nState := 102;
+				fbFileWrite(bExecute := FALSE);
+			END_IF
+		102: // file close
+			fbFileClose(
+				sNetId := '',
+				hFile := hFile,
+				bExecute := TRUE);
+			IF NOT fbFileClose.bBusy THEN
+				fbFileClose(bExecute := FALSE);
+				nState := 110;
+			END_IF
+			IF fbFileClose.bError THEN
+				fbFileClose(bExecute := FALSE);
+				nState := 110;
+			END_IF
+		110: // done state
+			M_StateComplete();
+	END_CASE
+	
+	CASE EjectState OF
+		0: // wait for eject command
+			Ejector.EjectSamplePass(Execute := FALSE);
+			Ejector.EjectSampleFail(Execute := FALSE);
+			IF Eject AND Pass THEN
+				EjectState := 10;
+			ELSIF Eject AND NOT Pass THEN
+				EjectState := 20;
+			END_IF
+		10: // execute the eject pass sequence
+			EjectSample := Ejector.EjectSamplePass(Execute := TRUE);
+			IF EjectSample = 1 THEN
+				Eject := FALSE;
+				Ejector.EjectSamplePass(Execute := FALSE);
+				EjectState := 0;
+			ELSIF EjectSample = -1 THEN
+				Eject := FALSE;
+				EjectState := 0;
+				Ejector.EjectSamplePass(Execute := FALSE);
+			END_IF
+		20: // execute the eject fail sequence
+			EjectSample := Ejector.EjectSampleFail(Execute := TRUE);
+			IF EjectSample = 1 THEN
+				Eject := FALSE;
+				Ejector.EjectSampleFail(Execute := FALSE);
+				EjectState := 0;
+			ELSIF EjectSample = -1 THEN
+				Eject := FALSE;
+				EjectState := 0;
+				Ejector.EjectSampleFail(Execute := FALSE);
+			END_IF
+
+	END_CASE
+ELSIF eMode = E_PMLProtectedUnitMode.ePMLProtUnitMode_Manual THEN
+	M_Manual();
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Held" Id="{f7964c5a-9ab2-4b03-b511-5669b80e790b}">
+      <Declaration><![CDATA[
+METHOD M_Held
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Holding" Id="{2046f787-6bb5-45cd-8a99-c7ccdd803d21}">
+      <Declaration><![CDATA[
+METHOD M_Holding
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Idle" Id="{1739e9a5-6673-40a0-80d7-c3aaf63b68a4}">
+      <Declaration><![CDATA[
+METHOD M_Idle
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Manual" Id="{fcac7ef0-bbdb-4ad2-b9fa-ef6c3a9884c2}">
+      <Declaration><![CDATA[METHOD M_Manual : BOOL
+VAR_INPUT
+END_VAR
+VAR_INST
+	Operational	: BOOL;
+	Result		: INT;
+	TON			: TON := (PT := T#5S);
+	x			: INT;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[
+IF Manual.bCameraCalibrate THEN
+	bBusy := TRUE;
+	IF M_CalibrateCamera(Execute := TRUE) <> 0 THEN
+		M_CalibrateCamera(Execute := FALSE);
+		bBusy := FALSE;
+		Manual.bCameraCalibrate := FALSE;
+	END_IF
+END_IF
+
+IF Manual.bCameraComputePeak THEN
+	bBusy := TRUE;
+	IF Camera.Compute(Execute := TRUE) = 1 THEN
+		bBusy := FALSE;
+		Camera.Compute(Execute := FALSE);
+		Manual.bCameraComputePeak := FALSE;
+	END_IF
+END_IF
+
+IF Manual.bCameraInspect THEN
+	bBusy := TRUE;
+	IF Camera.Inspect(Execute := TRUE) = 1 THEN
+		Camera.Inspect(Execute := FALSE);
+		Manual.bCameraInspect := FALSE;
+		bBusy := FALSE;
+	END_IF
+END_IF	
+
+IF Manual.bCameraRawData THEN
+	bBusy := TRUE;
+	IF Camera.GetCameraData() <> 0 THEN
+		bBusy := FALSE;
+		Manual.bCameraRawData := FALSE;
+	END_IF
+END_IF
+
+IF Manual.bCameraSelectTube THEN
+	bBusy := TRUE;
+	Result := Camera.SelectCameraProgram(Execute := TRUE);
+	IF Result = 1 THEN
+		bBusy := FALSE;
+		Manual.bCameraSelectTube := FALSE;
+		Camera.SelectCameraProgram(Execute := FALSE);
+	ELSIF Result = -1 THEN
+		bBusy := FALSE;
+		Manual.bCameraSelectTube := FALSE;
+		Camera.SelectCameraProgram(Execute := FALSE);
+		x := x + 1;
+	END_IF
+END_IF
+
+IF Manual.bCameraTrigger THEN
+	bBusy := TRUE;
+	IF Camera.TriggerCamera(Execute := TRUE) THEN
+		Camera.TriggerCamera(Execute := FALSE);
+		bBusy := FALSE;
+		Manual.bCameraTrigger := FALSE;
+	END_IF
+END_IF
+
+IF Manual.bCutSample THEN
+	bBusy := TRUE;
+	IF Cutter.CutSample(Execute := TRUE) <> 0 THEN
+		Cutter.CutSample(Execute := FALSE);
+		Manual.bCutSample := FALSE;
+		bBusy := FALSE;
+	END_IF
+END_IF
+
+IF Manual.bCutterDisable THEN
+	IF NOT bBusy THEN
+		Operational := Cutter.IsEnabled;
+		TON(IN := TRUE);
+	END_IF
+	bBusy := TRUE;
+	IF Operational THEN
+		IF Cutter.Disable() THEN
+			TON(IN := FALSE);
+			bBusy := FALSE;
+			Manual.bCutterDisable := FALSE;
+		END_IF
+	ELSE
+		IF Cutter.Enable() OR TON.q	THEN
+			bBusy := FALSE;
+			TON(IN := FALSE);
+			Manual.bCutterDisable := FALSE;
+		END_IF
+	END_IF
+	TON();
+END_IF
+
+IF Manual.bCutterHome THEN
+	bBusy := TRUE;
+	IF Cutter.Home(Execute := TRUE) <> 0 THEN
+		bBusy := FALSE;
+		Cutter.Home(Execute := FALSE);
+		Manual.bCutterHome := FALSE;
+	END_IF
+END_IF
+
+IF Manual.bCutterMoveAbs THEN
+	bBusy := FALSE;
+	IF Cutter.MoveAbs(Execute := TRUE) <> 0 THEN
+		bBusy := FALSE;
+		Cutter.MoveAbs(Execute := FALSE);
+		Manual.bCutterMoveAbs := FALSE;
+	END_IF
+END_IF
+
+IF Manual.bCutterReset THEN
+	bBusy := TRUE;
+	IF Cutter.Reset(Execute := TRUE) <> 0 THEN
+		bBusy := FALSE;
+		Manual.bCutterReset := FALSE;
+		Cutter.Reset(Execute := FALSE);
+	END_IF
+END_IF
+
+IF Manual.bEjectBlowOff THEN
+	Ejector.BlowOff := NOT Ejector.BlowOff;
+	Manual.bEjectBlowOff := FALSE;
+END_IF
+
+IF Manual.bEjectSamplePass THEN
+	bBusy := TRUE;
+	IF Ejector.EjectSamplePass(Execute := TRUE) = 1 THEN
+		Ejector.EjectSamplePass(Execute := FALSE);
+		Manual.bEjectSamplePass := FALSE;
+		bBusy := FALSE;
+	END_IF
+END_IF
+
+IF Manual.bEjectSampleFail THEN
+	bBusy := TRUE;
+	IF Ejector.EjectSampleFail(Execute := TRUE) = 1 THEN
+		Ejector.EjectSampleFail(Execute := FALSE);
+		Manual.bEjectSampleFail := FALSE;
+		bBusy := FALSE;
+	END_IF
+END_IF
+
+IF Manual.bEjectVacuum THEN
+	Ejector.PickUpVacuum := NOT Ejector.PickUpVacuum;
+	Manual.bEjectVacuum := FALSE;
+END_IF
+(*
+	bEjectAxisPassPosition	: BOOL;
+	bEjectAxisHomePosition	: BOOL;
+	bEjectAxisFailPosition	: BOOL;
+	bEjectAxisEnable		: BOOL;
+	bEjectAxisDisabe		: BOOL;
+	bEjectAxisReset			: BOOL;
+	bEjectSamplePass		: BOOL;
+	bEjectSampleFail		: BOOL;
+*)
+IF Manual.bEjectAxisEnableToggle THEN
+	IF NOT bBusy THEN
+		Operational := Ejector.axis.IsEnabled;
+	END_IF
+	bBusy := TRUE;
+	IF Operational THEN
+		IF Ejector.axis.Disable() THEN
+			bBusy := FALSE;
+			Manual.bEjectAxisEnableToggle := FALSE;
+		END_IF
+	ELSE
+		IF Ejector.axis.Enable() THEN
+			bBusy := FALSE;
+			Manual.bEjectAxisEnableToggle := FALSE;
+		END_IF		
+	END_IF
+END_IF
+
+IF Manual.bEjectAxisFailPosition THEN
+	bBusy := TRUE;
+	IF Ejector.axis.AbsMove(Execute := TRUE, 
+		Position := Ejector.EjectAxisFailPosition, 
+		Velocity := Ejector.EjectAxisVelocity) THEN
+			Ejector.axis.AbsMove(Execute := FALSE, Position := Ejector.EjectAxisFailPosition, Velocity := Ejector.EjectAxisVelocity);	
+			bBusy := FALSE;
+			Manual.bEjectAxisFailPosition := FALSE;
+	END_IF
+END_IF
+
+IF Manual.bEjectAxisHomePosition THEN
+	bBusy := TRUE;
+	IF Ejector.axis.AbsMove(Execute := TRUE, 
+		Position := Ejector.EjectAxisHomePosition, 
+		Velocity := Ejector.EjectAxisVelocity) THEN
+			Ejector.axis.AbsMove(Execute := FALSE, Position := Ejector.EjectAxisHomePosition, Velocity := Ejector.EjectAxisVelocity);
+			bBusy := FALSE;
+			Manual.bEjectAxisHomePosition := FALSE;
+	END_IF
+END_IF
+
+IF Manual.bEjectAxisPassPosition THEN
+	bBusy := TRUE;
+	IF Ejector.axis.AbsMove(Execute := TRUE, 
+		Position := Ejector.EjectAxisPassPosition, 
+		Velocity := Ejector.EjectAxisVelocity) THEN
+			Ejector.axis.AbsMove(Execute := FALSE, Position := Ejector.EjectAxisPassPosition, Velocity := Ejector.EjectAxisVelocity);
+			bBusy := FALSE;
+			Manual.bEjectAxisPassPosition := FALSE;
+	END_IF
+END_IF
+
+IF Manual.bEjectAxisReset THEN
+	bBusy := TRUE;
+	IF Ejector.axis.Reset(Execute := TRUE) THEN
+		Ejector.axis.Reset(Execute := FALSE);
+		bBusy := FALSE;
+		Manual.bEjectAxisReset := FALSE;
+	END_IF
+END_IF
+
+IF Manual.bEjectReset THEN
+	bBusy := TRUE;
+	IF Ejector.Reset(TRUE) = 1 THEN
+		Ejector.Reset(FALSE);
+		bBusy := FALSE;
+		Manual.bEjectReset := FALSE;
+	END_IF
+END_IF
+
+IF Manual.bEjectZExtend THEN
+	bBusy := TRUE;
+	IF Ejector.zSlide.Extend() = 1 THEN
+		bBusy := FALSE;
+		Manual.bEjectZExtend := FALSE;
+	END_IF
+END_IF
+
+IF Manual.bEjectZNeutral THEN
+	bBusy := TRUE;
+	IF Ejector.zSlide.Neutral() THEN
+		bBusy := FALSE;
+		Manual.bEjectZNeutral := FALSE;
+	END_IF
+END_IF
+
+IF Manual.bEjectZRetract THEN
+	bBusy := TRUE;
+	IF Ejector.zSlide.Retract() = 1 THEN
+		bBusy := FALSE;
+		Manual.bEjectZRetract := FALSE;
+	END_IF
+END_IF
+
+IF Manual.bLowerMandrel THEN
+	bBusy := TRUE;
+	IF Mandrel.LowerSample() = 1 THEN
+		bBusy := FALSE;
+		Manual.bLowerMandrel := FALSE;
+	END_IF
+END_IF
+
+IF Manual.bMandrelSpindleRotate THEN
+	bBusy := TRUE;
+	IF Mandrel.RotateSpindle(Execute := TRUE, Distance := Mandrel.SpindleIncrement) <> 0 THEN
+		bBusy := FALSE;
+		Mandrel.RotateSpindle(Execute := FALSE, Distance := Mandrel.SpindleIncrement);
+		Manual.bMandrelSpindleRotate := FALSE;
+	END_IF
+END_IF
+
+IF Manual.bMandrelSpindleToggle THEN
+	IF NOT bBusy THEN
+		Operational := Mandrel.OperationalSpindle;
+	END_IF
+	bBusy := TRUE;
+	IF Operational THEN
+		IF Mandrel.DisableSpindle() THEN
+			bBusy := FALSE;
+			Manual.bMandrelSpindleToggle := FALSE;
+		END_IF
+	ELSE
+		IF Mandrel.EnableSpindle() THEN
+			bBusy := FALSE;
+			Manual.bMandrelSpindleToggle := FALSE;
+		END_IF
+	END_IF
+END_IF
+
+IF Manual.bMandrelXEnableToggle THEN
+	IF NOT bBusy THEN
+		Operational := Mandrel.OperationalX;
+	END_IF
+	bBusy := TRUE;
+	IF Operational THEN
+		IF Mandrel.DisableX() THEN
+			bBusy := FALSE;
+			Manual.bMandrelXEnableToggle := FALSE;
+		END_IF
+	ELSE
+		IF Mandrel.EnableX() THEN
+			bBusy := FALSE;
+			Manual.bMandrelXEnableToggle := FALSE;
+		END_IF
+	END_IF	
+END_IF
+
+IF Manual.bMandrelYEnableToggle THEN
+	IF NOT bBusy THEN
+		Operational := Mandrel.OperationalY;
+	END_IF
+	bBusy := TRUE;
+	IF Operational THEN
+		IF Mandrel.DisableY() THEN
+			bBusy := FALSE;
+			Manual.bMandrelYEnableToggle := FALSE;
+		END_IF
+	ELSE
+		IF Mandrel.EnableY() THEN
+			bBusy := FALSE;
+			Manual.bMandrelYEnableToggle := FALSE;
+		END_IF
+	END_IF		
+END_IF
+
+IF Manual.bMandrelReset THEN
+	bBusy := TRUE;
+	IF Mandrel.Reset(Execute := TRUE) = 1 THEN
+		Mandrel.Reset(Execute := FALSE);
+		bBusy := FALSE;
+		Manual.bMandrelReset := FALSE;
+	END_IF
+END_IF
+
+IF Manual.bMoveToCutPosition THEN
+	bBusy := TRUE;
+	IF Mandrel.MoveToCutPosition(Execute := TRUE, CutPositionX := TubeHmi.CutPositionX, CutPositionY := TubeHmi.CutPositionY ) = 1 THEN
+		Mandrel.MoveToCutPosition(Execute := FALSE, CutPositionX := TubeHmi.CutPositionX, CutPositionY := TubeHmi.CutPositionY);
+		Manual.bMoveToCutPosition := FALSE;
+		bBusy := FALSE;
+	END_IF
+END_IF
+
+IF Manual.bMoveToEjectPosition THEN
+	bBusy := TRUE;
+	IF Mandrel.MoveToEjectPosition(Execute := TRUE, EjectPositionX := TubeHmi.EjectPositionX, EjectPositionY := TubeHmi.EjectPositionY) = 1 THEN
+		Mandrel.MoveToEjectPosition(Execute := FALSE, EjectPositionX := TubeHmi.EjectPositionX, EjectPositionY := TubeHmi.EjectPositionY);
+		Manual.bMoveToEjectPosition := FALSE;
+		bBusy := FALSE;
+	END_IF
+END_IF
+
+IF Manual.bMoveToInspectPosition THEN
+	bBusy := TRUE;
+	IF Mandrel.MoveToInspectPosition(Execute := TRUE, InspectPositionX := TubeHmi.InspectPositionX, InspectPositionY := TubeHmi.InspectPositionY) = 1 THEN
+		Mandrel.MoveToInspectPosition(Execute := FALSE, InspectPositionX := TubeHmi.InspectPositionX, InspectPositionY := TubeHmi.InspectPositionY);
+		Manual.bMoveToInspectPosition := FALSE;
+		bBusy := FALSE;
+	END_IF
+END_IF
+
+IF Manual.bMoveToLoadPosition THEN
+	bBusy := TRUE;
+	IF Mandrel.MoveToLoadPosition(Execute := TRUE) = 1 THEN
+		Mandrel.MoveToLoadPosition(Execute := FALSE);
+		Manual.bMoveToLoadPosition := FALSE;
+		bBusy := FALSE;
+	END_IF
+END_IF
+
+IF Manual.bRaiseMandrel THEN
+	bBusy := TRUE;
+	IF Mandrel.LiftSample() = 1 THEN
+		bBusy := FALSE;
+		Manual.bRaiseMandrel := FALSE;
+	END_IF
+END_IF
+
+IF Manual.bToggleMandrelVacuum THEN
+	Mandrel.MandrelVacuum := NOT Mandrel.MandrelVacuum;
+	Manual.bToggleMandrelVacuum := FALSE;
+END_IF
+
+
+IF Manual.bVacuumAxisMove THEN
+	bBusy := TRUE;
+	IF Mandrel.VacAxis.AbsMove(Execute := TRUE, Position := TubeHmi.VacPosition, Velocity := Mandrel.VacuumVelocity) THEN
+		Mandrel.VacAxis.AbsMove(Execute := FALSE, Position := 0, Velocity := 0);
+		bBusy := FALSE;
+		Manual.bVacuumAxisMove := FALSE;
+	END_IF
+END_IF
+
+IF Manual.bVacuumAxisReset THEN
+	bBusy := TRUE;
+	IF Mandrel.VacAxis.Reset(Execute := TRUE) THEN
+		Mandrel.VacAxis.Reset(Execute := FALSE);
+		bBusy := FALSE;
+		Manual.bVacuumAxisReset := FALSE;
+	END_IF
+END_IF
+
+IF Manual.bVacuumAxisToggleEnable THEN
+	IF NOT bBusy THEN
+		Operational := Mandrel.VacAxis.IsEnabled;
+	END_IF
+	bBusy := TRUE;
+	IF Operational THEN
+		IF Mandrel.VacAxis.Disable() THEN
+			bBusy := FALSE;
+			Manual.bVacuumAxisToggleEnable := FALSE;
+		END_IF
+	ELSE
+		IF Mandrel.VacAxis.Enable() THEN
+			bBusy := FALSE;
+			Manual.bVacuumAxisToggleEnable := FALSE;
+		END_IF
+	END_IF
+END_IF
+	
+
+
+
+	
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Production" Id="{e87a4419-0c3b-4c97-a3dc-96de6ca8367a}">
+      <Declaration><![CDATA[METHOD M_Production : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Resetting" Id="{daf711f7-219e-493a-bc7c-67b051c232c6}">
+      <Declaration><![CDATA[METHOD M_Resetting
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[M_StateComplete();]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Starting" Id="{35fd1ca4-1107-4a25-9fdf-221a14434d2d}">
+      <Declaration><![CDATA[METHOD M_Starting
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[Mandrel.MoveToCutPosition(Execute := FALSE, CutPositionX := Tube.CutPositionX, CutPositionY := Tube.CutPositionY);
+Cutter.CutSample(Execute := FALSE);
+Mandrel.MoveToInspectPosition(Execute := FALSE, InspectPositionX := Tube.InspectPositionX, InspectPositionY := Tube.InspectPositionY);
+Camera.Inspect(Execute := FALSE);
+Mandrel.MoveToEjectPosition(Execute := FALSE, EjectPositionX := Tube.EjectPositionX, EjectPositionY := Tube.EjectPositionY);
+Mandrel.MoveToLoadPosition(Execute := FALSE);
+Camera.SelectCameraProgram(Execute := FALSE);
+//Mandrel.MoveToVacPosition(Execute := FALSE);
+fbFileOpen(bExecute := FALSE);
+fbFileWrite(bExecute := FALSE);
+fbFileClose(bExecute := FALSE);
+
+IF Mandrel.LowerSample() = 1 THEN
+	M_StateComplete();
+END_IF
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Stopped" Id="{41043cf7-9cd8-4b89-87f5-ed71964cde2c}">
+      <Declaration><![CDATA[
+METHOD M_Stopped
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Stopping" Id="{72700132-7159-42d1-9da3-fac2d393e036}">
+      <Declaration><![CDATA[
+METHOD M_Stopping
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Suspended" Id="{073e1932-7551-4d55-960b-702ab8915955}">
+      <Declaration><![CDATA[
+METHOD M_Suspended
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Suspending" Id="{41298518-d022-4fd2-814a-dab820629ffd}">
+      <Declaration><![CDATA[
+METHOD M_Suspending
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Undefined" Id="{58755443-af9d-4d3e-aca7-a634b5941bbb}">
+      <Declaration><![CDATA[
+METHOD M_Undefined
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Unholding" Id="{2d1c0a06-196f-4f18-a8b4-e49409c39881}">
+      <Declaration><![CDATA[
+METHOD M_Unholding
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="M_Unsuspending" Id="{0b99b7cd-e845-4aec-8993-abd7fcf7e532}">
+      <Declaration><![CDATA[
+METHOD M_Unsuspending
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="MandrelCalibration" Id="{39c6017d-3381-4a9f-8bc6-c60e36adbd56}">
+      <Declaration><![CDATA[METHOD MandrelCalibration : BOOL
+VAR_INPUT
+END_VAR
+
+VAR
+	i: INT;
+	SumX: LREAL;
+	SumY: LREAL;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[SumX := 0;
+SumY := 0;
+FOR i:= 0 TO CalMax DO
+	SumX := CalibrationArrayX[i] + SumX;
+	SumY := CalibrationArrayY[i] + SumY;
+END_FOR
+AverageX := SumX / 10.0;
+AverageY := SumY / 10.0;
+
+Tube.CutPositionX := Tube.CutPositionX - AverageX;
+Tube.CutPositionY := Tube.CutPositionY - AverageY;
+
+
+
+
+]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="MandrelVacuum" Id="{daad43ef-8d3d-4d99-bc52-f75f95baf184}">
+      <Declaration><![CDATA[PROPERTY MandrelVacuum : BOOL]]></Declaration>
+      <Get Name="Get" Id="{f61f4ab4-fac0-4178-bdf9-a05c369b6b8c}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[MandrelVacuum := Mandrel.MandrelVacuum;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{97015efa-dd25-4e34-bd76-a318500ce5ef}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[Mandrel.MandrelVacuum := MandrelVacuum;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Method Name="ReadParameters" Id="{e2e0a2dc-167d-49c5-8f59-82df96707744}">
+      <Declaration><![CDATA[METHOD ReadParameters : BOOL
+VAR_INPUT
+	Execute	: BOOL;
+END_VAR
+VAR_INST
+	nReadIndex	: INT;
+	rTrig		: R_TRIG;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[ReadParameters := FALSE;
+rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	nReadIndex := 5;
+END_IF
+
+IF NOT Execute THEN
+	nReadIndex := 0;
+END_IF
+
+CASE nReadIndex OF
+	5: // read the info from the config file for the camera
+		fbXmlSrvRead.sXPath := '/Configuration/Camera';
+		fbXmlSrvRead.pSymAddr := ADR(CameraParameters);
+		fbXmlSrvRead.cbSymSize := SIZEOF(CameraParameters);
+		fbXmlSrvRead.bExecute := TRUE;
+		nReadIndex := 10;
+	10: // wait for the info to load
+		IF NOT fbXmlSrvRead.bBusy THEN
+			fbXmlSrvRead.bExecute := FALSE;
+			Camera.Parameters := CameraParameters;
+			nReadIndex := 20;
+		END_IF
+	20: // read the info from the config file for the cutter
+		fbXmlSrvRead.sXPath := '/Configuration/Cutter';
+		fbXmlSrvRead.pSymAddr := ADR(CutterParameters);
+		fbXmlSrvRead.cbSymSize := SIZEOF(CutterParameters);
+		fbXmlSrvRead.bExecute := TRUE;
+		nReadIndex := 30;
+	30: // wait to complete
+		IF NOT fbXmlSrvRead.bBusy THEN
+			fbXmlSrvRead.bExecute := FALSE;
+			Cutter.Parameters := CutterParameters;
+			nReadIndex := 40;
+		END_IF
+	40: // read the ejector parameters
+		fbXmlSrvRead.sXPath := '/Configuration/Ejector';
+		fbXmlSrvRead.pSymAddr := ADR(EjectorParameters);
+		fbXmlSrvRead.cbSymSize := SIZEOF(EjectorParameters);
+		fbXmlSrvRead.bExecute := TRUE;
+		nReadIndex := 50;
+	50: // wait
+		IF NOT fbXmlSrvRead.bBusy THEN
+			fbXmlSrvRead.bExecute := FALSE;
+			Ejector.Parameters := EjectorParameters;
+			nReadIndex := 60;
+		END_IF
+	60: // read mandrel parameters
+		fbXmlSrvRead.sXPath := '/Configuration/Mandrel';
+		fbXmlSrvRead.pSymAddr := ADR(MandrelParameters);
+		fbXmlSrvRead.cbSymSize := SIZEOF(MandrelParameters);
+		fbXmlSrvRead.bExecute := TRUE;
+		nReadIndex := 70;
+	70: // wait
+		IF NOT fbXmlSrvRead.bBusy THEN
+			fbXmlSrvRead.bExecute := FALSE;
+			Mandrel.Parameters := MandrelParameters;
+			nReadIndex := 80;
+		END_IF
+	80: // done reading parameters
+		ReadParameters := TRUE;		
+END_CASE
+
+fbXmlSrvRead(
+	sNetId:= '', 
+	ePath:= E_OpenPath.PATH_GENERIC, 
+	nMode:= XMLSRV_SKIPMISSING, 
+	sFilePath:= 'C:\Configuration.xml');
+]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="SaveParameters" Id="{9b2a545f-584b-4c00-8d82-f9848d7b9196}">
+      <Declaration><![CDATA[METHOD SaveParameters : BOOL
+VAR_INPUT
+	Execute	: BOOL;
+END_VAR
+VAR_INST
+	nSaveIndex	: INT;
+	rTrig		: R_TRIG;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[SaveParameters := FALSE;
+
+rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	nSaveIndex := 10;
+END_IF
+
+IF NOT Execute THEN
+	nSaveIndex := 0;
+END_IF
+
+CASE nSaveIndex OF
+	10: // read the info from the config file for the camera
+		fbXmlSrvWrite.sXPath := '/Configuration/Camera';
+		CameraParameters := Camera.Parameters;
+		fbXmlSrvWrite.pSymAddr := ADR(CameraParameters);
+		fbXmlSrvWrite.cbSymSize := SIZEOF(CameraParameters);
+		fbXmlSrvWrite.bExecute := TRUE;
+		nSaveIndex := 20;
+	20: // wait for the info to load
+		IF NOT fbXmlSrvWrite.bBusy THEN
+			fbXmlSrvWrite.bExecute := FALSE;
+			nSaveIndex := 30;
+		END_IF
+	30: // read the info from the config file for the cutter
+		fbXmlSrvWrite.sXPath := '/Configuration/Cutter';
+		CutterParameters := Cutter.Parameters;
+		fbXmlSrvWrite.pSymAddr := ADR(CutterParameters);
+		fbXmlSrvWrite.cbSymSize := SIZEOF(CutterParameters);
+		fbXmlSrvWrite.bExecute := TRUE;
+		nSaveIndex := 40;
+	40: // wait to complete
+		IF NOT fbXmlSrvWrite.bBusy THEN
+			fbXmlSrvWrite.bExecute := FALSE;
+			nSaveIndex := 50;
+		END_IF
+	50: // read the ejector parameters
+		fbXmlSrvWrite.sXPath := '/Configuration/Ejector';
+		EjectorParameters := Ejector.Parameters;
+		fbXmlSrvWrite.pSymAddr := ADR(EjectorParameters);
+		fbXmlSrvWrite.cbSymSize := SIZEOF(EjectorParameters);
+		fbXmlSrvWrite.bExecute := TRUE;
+		nSaveIndex := 60;
+	60: // wait
+		IF NOT fbXmlSrvWrite.bBusy THEN
+			fbXmlSrvWrite.bExecute := FALSE;
+			nSaveIndex := 70;
+		END_IF
+	70: // write mandrel parameters
+		fbXmlSrvWrite.sXPath := '/Configuration/Mandrel';
+		MandrelParameters := Mandrel.Parameters;
+		fbXmlSrvWrite.pSymAddr := ADR(MandrelParameters);
+		fbXmlSrvWrite.cbSymSize := SIZEOF(MandrelParameters);
+		fbXmlSrvWrite.bExecute := TRUE;
+		nSaveIndex := 80;
+	80: // wait
+		IF NOT fbXmlSrvWrite.bBusy THEN
+			fbXmlSrvWrite.bExecute := FALSE;
+			fbMessageSaved.Send(0);
+			nSaveIndex := 90;
+		END_IF
+	90: // done writing parameters
+		SaveParameters := TRUE;		
+END_CASE
+
+fbXmlSrvWrite(
+	sNetId:= '', 
+	ePath:= E_OpenPath.PATH_GENERIC, 
+	nMode:= XMLSRV_SKIPMISSING, 
+	sFilePath:= 'C:\Configuration.xml');
+]]></ST>
+      </Implementation>
+    </Method>
+    <LineIds Name="FB_Slitter">
+      <LineId Id="288" Count="0" />
+      <LineId Id="49" Count="0" />
+      <LineId Id="357" Count="0" />
+      <LineId Id="356" Count="0" />
+      <LineId Id="358" Count="0" />
+      <LineId Id="360" Count="2" />
+      <LineId Id="359" Count="0" />
+      <LineId Id="161" Count="0" />
+      <LineId Id="160" Count="0" />
+      <LineId Id="128" Count="0" />
+      <LineId Id="122" Count="0" />
+      <LineId Id="119" Count="0" />
+      <LineId Id="123" Count="0" />
+      <LineId Id="125" Count="1" />
+      <LineId Id="124" Count="0" />
+      <LineId Id="194" Count="0" />
+      <LineId Id="193" Count="0" />
+      <LineId Id="199" Count="0" />
+      <LineId Id="84" Count="0" />
+      <LineId Id="83" Count="0" />
+      <LineId Id="73" Count="0" />
+      <LineId Id="72" Count="0" />
+      <LineId Id="77" Count="0" />
+      <LineId Id="74" Count="0" />
+      <LineId Id="114" Count="0" />
+      <LineId Id="108" Count="4" />
+      <LineId Id="234" Count="1" />
+      <LineId Id="113" Count="0" />
+      <LineId Id="115" Count="0" />
+      <LineId Id="75" Count="0" />
+      <LineId Id="50" Count="0" />
+      <LineId Id="31" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.FB_init">
+      <LineId Id="7" Count="2" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.M_Aborting">
+      <LineId Id="53" Count="1" />
+      <LineId Id="13" Count="1" />
+      <LineId Id="12" Count="0" />
+      <LineId Id="15" Count="1" />
+      <LineId Id="55" Count="2" />
+      <LineId Id="61" Count="0" />
+      <LineId Id="52" Count="0" />
+      <LineId Id="17" Count="9" />
+      <LineId Id="64" Count="0" />
+      <LineId Id="66" Count="3" />
+      <LineId Id="27" Count="0" />
+      <LineId Id="71" Count="0" />
+      <LineId Id="28" Count="0" />
+      <LineId Id="63" Count="0" />
+      <LineId Id="29" Count="0" />
+      <LineId Id="34" Count="3" />
+      <LineId Id="39" Count="1" />
+      <LineId Id="58" Count="0" />
+      <LineId Id="41" Count="9" />
+      <LineId Id="72" Count="2" />
+      <LineId Id="51" Count="0" />
+      <LineId Id="8" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.M_CalibrateCamera">
+      <LineId Id="5" Count="0" />
+      <LineId Id="11" Count="1" />
+      <LineId Id="25" Count="0" />
+      <LineId Id="100" Count="1" />
+      <LineId Id="156" Count="0" />
+      <LineId Id="36" Count="0" />
+      <LineId Id="89" Count="0" />
+      <LineId Id="13" Count="0" />
+      <LineId Id="15" Count="0" />
+      <LineId Id="14" Count="0" />
+      <LineId Id="160" Count="0" />
+      <LineId Id="16" Count="1" />
+      <LineId Id="19" Count="0" />
+      <LineId Id="18" Count="0" />
+      <LineId Id="20" Count="0" />
+      <LineId Id="22" Count="0" />
+      <LineId Id="77" Count="0" />
+      <LineId Id="23" Count="1" />
+      <LineId Id="30" Count="0" />
+      <LineId Id="26" Count="0" />
+      <LineId Id="28" Count="1" />
+      <LineId Id="31" Count="0" />
+      <LineId Id="27" Count="0" />
+      <LineId Id="32" Count="1" />
+      <LineId Id="37" Count="5" />
+      <LineId Id="48" Count="0" />
+      <LineId Id="44" Count="1" />
+      <LineId Id="34" Count="0" />
+      <LineId Id="46" Count="0" />
+      <LineId Id="49" Count="0" />
+      <LineId Id="52" Count="0" />
+      <LineId Id="35" Count="0" />
+      <LineId Id="53" Count="0" />
+      <LineId Id="55" Count="5" />
+      <LineId Id="157" Count="2" />
+      <LineId Id="126" Count="15" />
+      <LineId Id="143" Count="1" />
+      <LineId Id="142" Count="0" />
+      <LineId Id="123" Count="0" />
+      <LineId Id="146" Count="0" />
+      <LineId Id="148" Count="7" />
+      <LineId Id="145" Count="0" />
+      <LineId Id="21" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.M_Clearing">
+      <LineId Id="16" Count="0" />
+      <LineId Id="18" Count="0" />
+      <LineId Id="20" Count="1" />
+      <LineId Id="19" Count="0" />
+      <LineId Id="17" Count="0" />
+      <LineId Id="8" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.M_ClearingManual">
+      <LineId Id="5" Count="0" />
+      <LineId Id="9" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.M_ClearingProduction">
+      <LineId Id="6" Count="1" />
+      <LineId Id="17" Count="0" />
+      <LineId Id="22" Count="1" />
+      <LineId Id="18" Count="0" />
+      <LineId Id="26" Count="0" />
+      <LineId Id="29" Count="3" />
+      <LineId Id="46" Count="3" />
+      <LineId Id="45" Count="0" />
+      <LineId Id="16" Count="0" />
+      <LineId Id="8" Count="3" />
+      <LineId Id="37" Count="0" />
+      <LineId Id="33" Count="0" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.M_Complete">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.M_Completing">
+      <LineId Id="25" Count="0" />
+      <LineId Id="7" Count="1" />
+      <LineId Id="26" Count="0" />
+      <LineId Id="30" Count="21" />
+      <LineId Id="24" Count="0" />
+      <LineId Id="4" Count="0" />
+      <LineId Id="27" Count="1" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.M_Execute">
+      <LineId Id="268" Count="0" />
+      <LineId Id="781" Count="3" />
+      <LineId Id="362" Count="0" />
+      <LineId Id="269" Count="1" />
+      <LineId Id="536" Count="0" />
+      <LineId Id="891" Count="0" />
+      <LineId Id="980" Count="3" />
+      <LineId Id="979" Count="0" />
+      <LineId Id="612" Count="0" />
+      <LineId Id="806" Count="0" />
+      <LineId Id="519" Count="0" />
+      <LineId Id="500" Count="0" />
+      <LineId Id="567" Count="0" />
+      <LineId Id="501" Count="0" />
+      <LineId Id="503" Count="0" />
+      <LineId Id="568" Count="0" />
+      <LineId Id="1203" Count="0" />
+      <LineId Id="504" Count="0" />
+      <LineId Id="502" Count="0" />
+      <LineId Id="1139" Count="0" />
+      <LineId Id="1141" Count="0" />
+      <LineId Id="1145" Count="0" />
+      <LineId Id="1144" Count="0" />
+      <LineId Id="1142" Count="0" />
+      <LineId Id="278" Count="1" />
+      <LineId Id="606" Count="1" />
+      <LineId Id="793" Count="0" />
+      <LineId Id="608" Count="0" />
+      <LineId Id="795" Count="0" />
+      <LineId Id="800" Count="0" />
+      <LineId Id="796" Count="1" />
+      <LineId Id="799" Count="0" />
+      <LineId Id="798" Count="0" />
+      <LineId Id="801" Count="0" />
+      <LineId Id="805" Count="0" />
+      <LineId Id="802" Count="0" />
+      <LineId Id="804" Count="0" />
+      <LineId Id="803" Count="0" />
+      <LineId Id="792" Count="0" />
+      <LineId Id="280" Count="3" />
+      <LineId Id="613" Count="0" />
+      <LineId Id="284" Count="2" />
+      <LineId Id="1204" Count="0" />
+      <LineId Id="614" Count="0" />
+      <LineId Id="287" Count="1" />
+      <LineId Id="892" Count="1" />
+      <LineId Id="895" Count="0" />
+      <LineId Id="289" Count="7" />
+      <LineId Id="896" Count="0" />
+      <LineId Id="455" Count="0" />
+      <LineId Id="297" Count="0" />
+      <LineId Id="569" Count="0" />
+      <LineId Id="298" Count="0" />
+      <LineId Id="301" Count="6" />
+      <LineId Id="677" Count="1" />
+      <LineId Id="680" Count="1" />
+      <LineId Id="898" Count="0" />
+      <LineId Id="683" Count="0" />
+      <LineId Id="899" Count="1" />
+      <LineId Id="909" Count="0" />
+      <LineId Id="682" Count="0" />
+      <LineId Id="684" Count="0" />
+      <LineId Id="897" Count="0" />
+      <LineId Id="902" Count="0" />
+      <LineId Id="910" Count="0" />
+      <LineId Id="1173" Count="0" />
+      <LineId Id="911" Count="0" />
+      <LineId Id="917" Count="0" />
+      <LineId Id="920" Count="1" />
+      <LineId Id="923" Count="3" />
+      <LineId Id="1174" Count="0" />
+      <LineId Id="912" Count="0" />
+      <LineId Id="927" Count="2" />
+      <LineId Id="975" Count="0" />
+      <LineId Id="930" Count="0" />
+      <LineId Id="932" Count="0" />
+      <LineId Id="976" Count="0" />
+      <LineId Id="933" Count="1" />
+      <LineId Id="977" Count="0" />
+      <LineId Id="935" Count="1" />
+      <LineId Id="978" Count="0" />
+      <LineId Id="937" Count="0" />
+      <LineId Id="931" Count="0" />
+      <LineId Id="939" Count="1" />
+      <LineId Id="968" Count="0" />
+      <LineId Id="970" Count="0" />
+      <LineId Id="969" Count="0" />
+      <LineId Id="941" Count="0" />
+      <LineId Id="971" Count="3" />
+      <LineId Id="901" Count="0" />
+      <LineId Id="308" Count="2" />
+      <LineId Id="433" Count="0" />
+      <LineId Id="585" Count="0" />
+      <LineId Id="670" Count="0" />
+      <LineId Id="1010" Count="1" />
+      <LineId Id="1013" Count="3" />
+      <LineId Id="1018" Count="0" />
+      <LineId Id="1066" Count="0" />
+      <LineId Id="1017" Count="0" />
+      <LineId Id="1012" Count="0" />
+      <LineId Id="1094" Count="0" />
+      <LineId Id="311" Count="0" />
+      <LineId Id="668" Count="0" />
+      <LineId Id="586" Count="0" />
+      <LineId Id="1205" Count="0" />
+      <LineId Id="1095" Count="0" />
+      <LineId Id="587" Count="0" />
+      <LineId Id="669" Count="0" />
+      <LineId Id="588" Count="0" />
+      <LineId Id="836" Count="1" />
+      <LineId Id="852" Count="0" />
+      <LineId Id="840" Count="1" />
+      <LineId Id="890" Count="0" />
+      <LineId Id="843" Count="1" />
+      <LineId Id="842" Count="0" />
+      <LineId Id="589" Count="0" />
+      <LineId Id="845" Count="1" />
+      <LineId Id="848" Count="1" />
+      <LineId Id="851" Count="0" />
+      <LineId Id="850" Count="0" />
+      <LineId Id="847" Count="0" />
+      <LineId Id="315" Count="19" />
+      <LineId Id="590" Count="0" />
+      <LineId Id="1111" Count="0" />
+      <LineId Id="552" Count="0" />
+      <LineId Id="615" Count="1" />
+      <LineId Id="1019" Count="0" />
+      <LineId Id="1029" Count="2" />
+      <LineId Id="1024" Count="0" />
+      <LineId Id="1032" Count="0" />
+      <LineId Id="1020" Count="0" />
+      <LineId Id="1025" Count="0" />
+      <LineId Id="1022" Count="0" />
+      <LineId Id="1033" Count="0" />
+      <LineId Id="1026" Count="1" />
+      <LineId Id="1021" Count="0" />
+      <LineId Id="1028" Count="0" />
+      <LineId Id="1063" Count="2" />
+      <LineId Id="1062" Count="0" />
+      <LineId Id="938" Count="0" />
+      <LineId Id="336" Count="1" />
+      <LineId Id="617" Count="0" />
+      <LineId Id="639" Count="0" />
+      <LineId Id="339" Count="0" />
+      <LineId Id="618" Count="0" />
+      <LineId Id="340" Count="2" />
+      <LineId Id="459" Count="0" />
+      <LineId Id="664" Count="1" />
+      <LineId Id="667" Count="0" />
+      <LineId Id="666" Count="0" />
+      <LineId Id="662" Count="0" />
+      <LineId Id="906" Count="0" />
+      <LineId Id="671" Count="3" />
+      <LineId Id="905" Count="0" />
+      <LineId Id="907" Count="1" />
+      <LineId Id="675" Count="0" />
+      <LineId Id="685" Count="0" />
+      <LineId Id="706" Count="0" />
+      <LineId Id="709" Count="0" />
+      <LineId Id="726" Count="0" />
+      <LineId Id="729" Count="3" />
+      <LineId Id="757" Count="0" />
+      <LineId Id="733" Count="1" />
+      <LineId Id="740" Count="5" />
+      <LineId Id="735" Count="1" />
+      <LineId Id="746" Count="0" />
+      <LineId Id="749" Count="5" />
+      <LineId Id="747" Count="1" />
+      <LineId Id="737" Count="0" />
+      <LineId Id="810" Count="0" />
+      <LineId Id="711" Count="2" />
+      <LineId Id="779" Count="1" />
+      <LineId Id="785" Count="0" />
+      <LineId Id="787" Count="0" />
+      <LineId Id="786" Count="0" />
+      <LineId Id="716" Count="1" />
+      <LineId Id="719" Count="1" />
+      <LineId Id="853" Count="1" />
+      <LineId Id="718" Count="0" />
+      <LineId Id="855" Count="0" />
+      <LineId Id="714" Count="1" />
+      <LineId Id="721" Count="3" />
+      <LineId Id="856" Count="0" />
+      <LineId Id="859" Count="0" />
+      <LineId Id="861" Count="0" />
+      <LineId Id="863" Count="0" />
+      <LineId Id="857" Count="0" />
+      <LineId Id="725" Count="0" />
+      <LineId Id="738" Count="0" />
+      <LineId Id="755" Count="0" />
+      <LineId Id="808" Count="0" />
+      <LineId Id="759" Count="2" />
+      <LineId Id="758" Count="0" />
+      <LineId Id="762" Count="1" />
+      <LineId Id="765" Count="0" />
+      <LineId Id="764" Count="0" />
+      <LineId Id="767" Count="1" />
+      <LineId Id="770" Count="0" />
+      <LineId Id="769" Count="0" />
+      <LineId Id="766" Count="0" />
+      <LineId Id="771" Count="5" />
+      <LineId Id="778" Count="0" />
+      <LineId Id="777" Count="0" />
+      <LineId Id="788" Count="1" />
+      <LineId Id="791" Count="0" />
+      <LineId Id="790" Count="0" />
+      <LineId Id="676" Count="0" />
+      <LineId Id="460" Count="0" />
+      <LineId Id="343" Count="4" />
+      <LineId Id="1110" Count="0" />
+      <LineId Id="348" Count="1" />
+      <LineId Id="1096" Count="1" />
+      <LineId Id="350" Count="11" />
+      <LineId Id="1098" Count="0" />
+      <LineId Id="1100" Count="9" />
+      <LineId Id="1099" Count="0" />
+      <LineId Id="92" Count="0" />
+      <LineId Id="363" Count="0" />
+      <LineId Id="417" Count="0" />
+      <LineId Id="366" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.M_Held">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.M_Holding">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.M_Idle">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.M_Manual">
+      <LineId Id="516" Count="0" />
+      <LineId Id="447" Count="0" />
+      <LineId Id="449" Count="0" />
+      <LineId Id="453" Count="1" />
+      <LineId Id="456" Count="0" />
+      <LineId Id="458" Count="0" />
+      <LineId Id="455" Count="0" />
+      <LineId Id="450" Count="0" />
+      <LineId Id="448" Count="0" />
+      <LineId Id="439" Count="1" />
+      <LineId Id="442" Count="1" />
+      <LineId Id="445" Count="1" />
+      <LineId Id="444" Count="0" />
+      <LineId Id="441" Count="0" />
+      <LineId Id="459" Count="0" />
+      <LineId Id="395" Count="7" />
+      <LineId Id="415" Count="0" />
+      <LineId Id="431" Count="0" />
+      <LineId Id="433" Count="0" />
+      <LineId Id="435" Count="1" />
+      <LineId Id="438" Count="0" />
+      <LineId Id="437" Count="0" />
+      <LineId Id="434" Count="0" />
+      <LineId Id="484" Count="0" />
+      <LineId Id="483" Count="0" />
+      <LineId Id="485" Count="0" />
+      <LineId Id="504" Count="0" />
+      <LineId Id="487" Count="1" />
+      <LineId Id="490" Count="0" />
+      <LineId Id="505" Count="0" />
+      <LineId Id="489" Count="0" />
+      <LineId Id="492" Count="1" />
+      <LineId Id="506" Count="0" />
+      <LineId Id="494" Count="1" />
+      <LineId Id="486" Count="0" />
+      <LineId Id="404" Count="0" />
+      <LineId Id="403" Count="0" />
+      <LineId Id="405" Count="0" />
+      <LineId Id="407" Count="1" />
+      <LineId Id="410" Count="1" />
+      <LineId Id="409" Count="0" />
+      <LineId Id="406" Count="0" />
+      <LineId Id="201" Count="0" />
+      <LineId Id="105" Count="6" />
+      <LineId Id="114" Count="0" />
+      <LineId Id="315" Count="0" />
+      <LineId Id="314" Count="0" />
+      <LineId Id="341" Count="1" />
+      <LineId Id="359" Count="0" />
+      <LineId Id="343" Count="0" />
+      <LineId Id="316" Count="0" />
+      <LineId Id="340" Count="0" />
+      <LineId Id="318" Count="0" />
+      <LineId Id="360" Count="0" />
+      <LineId Id="319" Count="0" />
+      <LineId Id="321" Count="0" />
+      <LineId Id="320" Count="0" />
+      <LineId Id="344" Count="1" />
+      <LineId Id="347" Count="0" />
+      <LineId Id="362" Count="0" />
+      <LineId Id="349" Count="0" />
+      <LineId Id="348" Count="0" />
+      <LineId Id="346" Count="0" />
+      <LineId Id="361" Count="0" />
+      <LineId Id="317" Count="0" />
+      <LineId Id="350" Count="0" />
+      <LineId Id="323" Count="0" />
+      <LineId Id="351" Count="0" />
+      <LineId Id="353" Count="1" />
+      <LineId Id="356" Count="0" />
+      <LineId Id="363" Count="0" />
+      <LineId Id="355" Count="0" />
+      <LineId Id="352" Count="0" />
+      <LineId Id="377" Count="0" />
+      <LineId Id="376" Count="0" />
+      <LineId Id="378" Count="0" />
+      <LineId Id="380" Count="1" />
+      <LineId Id="383" Count="1" />
+      <LineId Id="382" Count="0" />
+      <LineId Id="379" Count="0" />
+      <LineId Id="331" Count="0" />
+      <LineId Id="330" Count="0" />
+      <LineId Id="332" Count="0" />
+      <LineId Id="334" Count="0" />
+      <LineId Id="337" Count="0" />
+      <LineId Id="335" Count="0" />
+      <LineId Id="338" Count="0" />
+      <LineId Id="336" Count="0" />
+      <LineId Id="333" Count="0" />
+      <LineId Id="263" Count="0" />
+      <LineId Id="262" Count="0" />
+      <LineId Id="264" Count="0" />
+      <LineId Id="266" Count="0" />
+      <LineId Id="265" Count="0" />
+      <LineId Id="104" Count="0" />
+      <LineId Id="93" Count="6" />
+      <LineId Id="102" Count="0" />
+      <LineId Id="593" Count="0" />
+      <LineId Id="596" Count="8" />
+      <LineId Id="255" Count="0" />
+      <LineId Id="257" Count="0" />
+      <LineId Id="259" Count="0" />
+      <LineId Id="258" Count="0" />
+      <LineId Id="267" Count="0" />
+      <LineId Id="526" Count="7" />
+      <LineId Id="525" Count="0" />
+      <LineId Id="534" Count="0" />
+      <LineId Id="639" Count="7" />
+      <LineId Id="535" Count="0" />
+      <LineId Id="647" Count="0" />
+      <LineId Id="650" Count="2" />
+      <LineId Id="648" Count="1" />
+      <LineId Id="536" Count="0" />
+      <LineId Id="550" Count="0" />
+      <LineId Id="549" Count="0" />
+      <LineId Id="551" Count="0" />
+      <LineId Id="553" Count="0" />
+      <LineId Id="556" Count="4" />
+      <LineId Id="555" Count="0" />
+      <LineId Id="552" Count="0" />
+      <LineId Id="562" Count="0" />
+      <LineId Id="561" Count="0" />
+      <LineId Id="563" Count="0" />
+      <LineId Id="565" Count="0" />
+      <LineId Id="568" Count="1" />
+      <LineId Id="571" Count="0" />
+      <LineId Id="566" Count="0" />
+      <LineId Id="572" Count="0" />
+      <LineId Id="567" Count="0" />
+      <LineId Id="564" Count="0" />
+      <LineId Id="573" Count="10" />
+      <LineId Id="585" Count="0" />
+      <LineId Id="584" Count="0" />
+      <LineId Id="586" Count="0" />
+      <LineId Id="588" Count="1" />
+      <LineId Id="591" Count="1" />
+      <LineId Id="590" Count="0" />
+      <LineId Id="587" Count="0" />
+      <LineId Id="654" Count="0" />
+      <LineId Id="653" Count="0" />
+      <LineId Id="655" Count="0" />
+      <LineId Id="657" Count="1" />
+      <LineId Id="660" Count="1" />
+      <LineId Id="659" Count="0" />
+      <LineId Id="656" Count="0" />
+      <LineId Id="290" Count="23" />
+      <LineId Id="175" Count="0" />
+      <LineId Id="174" Count="0" />
+      <LineId Id="176" Count="0" />
+      <LineId Id="178" Count="1" />
+      <LineId Id="181" Count="0" />
+      <LineId Id="180" Count="0" />
+      <LineId Id="177" Count="0" />
+      <LineId Id="468" Count="0" />
+      <LineId Id="467" Count="0" />
+      <LineId Id="469" Count="0" />
+      <LineId Id="471" Count="1" />
+      <LineId Id="474" Count="1" />
+      <LineId Id="473" Count="0" />
+      <LineId Id="470" Count="0" />
+      <LineId Id="159" Count="0" />
+      <LineId Id="158" Count="0" />
+      <LineId Id="184" Count="2" />
+      <LineId Id="160" Count="0" />
+      <LineId Id="182" Count="0" />
+      <LineId Id="192" Count="1" />
+      <LineId Id="195" Count="0" />
+      <LineId Id="194" Count="0" />
+      <LineId Id="189" Count="0" />
+      <LineId Id="191" Count="0" />
+      <LineId Id="196" Count="0" />
+      <LineId Id="198" Count="0" />
+      <LineId Id="197" Count="0" />
+      <LineId Id="190" Count="0" />
+      <LineId Id="161" Count="0" />
+      <LineId Id="163" Count="0" />
+      <LineId Id="162" Count="0" />
+      <LineId Id="204" Count="14" />
+      <LineId Id="165" Count="1" />
+      <LineId Id="92" Count="0" />
+      <LineId Id="219" Count="14" />
+      <LineId Id="168" Count="0" />
+      <LineId Id="171" Count="0" />
+      <LineId Id="170" Count="0" />
+      <LineId Id="172" Count="0" />
+      <LineId Id="234" Count="0" />
+      <LineId Id="238" Count="0" />
+      <LineId Id="235" Count="0" />
+      <LineId Id="237" Count="0" />
+      <LineId Id="236" Count="0" />
+      <LineId Id="173" Count="0" />
+      <LineId Id="169" Count="0" />
+      <LineId Id="69" Count="6" />
+      <LineId Id="78" Count="1" />
+      <LineId Id="81" Count="6" />
+      <LineId Id="90" Count="0" />
+      <LineId Id="246" Count="2" />
+      <LineId Id="250" Count="1" />
+      <LineId Id="253" Count="1" />
+      <LineId Id="252" Count="0" />
+      <LineId Id="249" Count="0" />
+      <LineId Id="68" Count="0" />
+      <LineId Id="6" Count="0" />
+      <LineId Id="50" Count="0" />
+      <LineId Id="7" Count="2" />
+      <LineId Id="51" Count="0" />
+      <LineId Id="10" Count="0" />
+      <LineId Id="13" Count="0" />
+      <LineId Id="133" Count="0" />
+      <LineId Id="132" Count="0" />
+      <LineId Id="134" Count="0" />
+      <LineId Id="136" Count="1" />
+      <LineId Id="139" Count="0" />
+      <LineId Id="138" Count="0" />
+      <LineId Id="135" Count="0" />
+      <LineId Id="143" Count="0" />
+      <LineId Id="142" Count="0" />
+      <LineId Id="144" Count="0" />
+      <LineId Id="146" Count="0" />
+      <LineId Id="145" Count="0" />
+      <LineId Id="706" Count="0" />
+      <LineId Id="663" Count="0" />
+      <LineId Id="662" Count="0" />
+      <LineId Id="670" Count="0" />
+      <LineId Id="664" Count="0" />
+      <LineId Id="666" Count="0" />
+      <LineId Id="668" Count="1" />
+      <LineId Id="667" Count="0" />
+      <LineId Id="665" Count="0" />
+      <LineId Id="672" Count="0" />
+      <LineId Id="671" Count="0" />
+      <LineId Id="673" Count="0" />
+      <LineId Id="675" Count="1" />
+      <LineId Id="678" Count="1" />
+      <LineId Id="677" Count="0" />
+      <LineId Id="674" Count="0" />
+      <LineId Id="681" Count="0" />
+      <LineId Id="680" Count="0" />
+      <LineId Id="682" Count="0" />
+      <LineId Id="684" Count="1" />
+      <LineId Id="687" Count="0" />
+      <LineId Id="686" Count="0" />
+      <LineId Id="688" Count="0" />
+      <LineId Id="690" Count="0" />
+      <LineId Id="692" Count="0" />
+      <LineId Id="691" Count="0" />
+      <LineId Id="693" Count="2" />
+      <LineId Id="697" Count="0" />
+      <LineId Id="696" Count="0" />
+      <LineId Id="689" Count="0" />
+      <LineId Id="683" Count="0" />
+      <LineId Id="52" Count="0" />
+      <LineId Id="55" Count="0" />
+      <LineId Id="58" Count="0" />
+      <LineId Id="61" Count="0" />
+      <LineId Id="64" Count="0" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.M_Production">
+      <LineId Id="5" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.M_Resetting">
+      <LineId Id="8" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.M_Starting">
+      <LineId Id="27" Count="5" />
+      <LineId Id="36" Count="0" />
+      <LineId Id="45" Count="0" />
+      <LineId Id="42" Count="0" />
+      <LineId Id="41" Count="0" />
+      <LineId Id="43" Count="0" />
+      <LineId Id="40" Count="0" />
+      <LineId Id="34" Count="0" />
+      <LineId Id="33" Count="0" />
+      <LineId Id="38" Count="0" />
+      <LineId Id="24" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.M_Stopped">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.M_Stopping">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.M_Suspended">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.M_Suspending">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.M_Undefined">
+      <LineId Id="9" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.M_Unholding">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.M_Unsuspending">
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.MandrelCalibration">
+      <LineId Id="30" Count="0" />
+      <LineId Id="35" Count="0" />
+      <LineId Id="24" Count="1" />
+      <LineId Id="32" Count="0" />
+      <LineId Id="26" Count="0" />
+      <LineId Id="39" Count="1" />
+      <LineId Id="42" Count="0" />
+      <LineId Id="41" Count="0" />
+      <LineId Id="43" Count="0" />
+      <LineId Id="36" Count="0" />
+      <LineId Id="20" Count="0" />
+      <LineId Id="19" Count="0" />
+      <LineId Id="17" Count="0" />
+      <LineId Id="16" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.MandrelVacuum.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.MandrelVacuum.Set">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.ReadParameters">
+      <LineId Id="71" Count="0" />
+      <LineId Id="73" Count="3" />
+      <LineId Id="78" Count="0" />
+      <LineId Id="77" Count="0" />
+      <LineId Id="79" Count="1" />
+      <LineId Id="72" Count="0" />
+      <LineId Id="6" Count="57" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Slitter.SaveParameters">
+      <LineId Id="80" Count="1" />
+      <LineId Id="5" Count="0" />
+      <LineId Id="11" Count="2" />
+      <LineId Id="15" Count="0" />
+      <LineId Id="14" Count="0" />
+      <LineId Id="16" Count="1" />
+      <LineId Id="19" Count="0" />
+      <LineId Id="18" Count="0" />
+      <LineId Id="30" Count="1" />
+      <LineId Id="82" Count="0" />
+      <LineId Id="32" Count="6" />
+      <LineId Id="40" Count="3" />
+      <LineId Id="83" Count="0" />
+      <LineId Id="44" Count="6" />
+      <LineId Id="52" Count="3" />
+      <LineId Id="84" Count="0" />
+      <LineId Id="56" Count="6" />
+      <LineId Id="64" Count="3" />
+      <LineId Id="85" Count="0" />
+      <LineId Id="68" Count="6" />
+      <LineId Id="86" Count="0" />
+      <LineId Id="76" Count="3" />
+      <LineId Id="21" Count="0" />
+      <LineId Id="23" Count="5" />
+      <LineId Id="22" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

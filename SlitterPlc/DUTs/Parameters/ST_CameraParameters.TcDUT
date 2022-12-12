@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.9">
+  <DUT Name="ST_CameraParameters" Id="{e7957523-5f8e-451d-a4f9-3cf9764c37e1}">
+    <Declaration><![CDATA[TYPE ST_CameraParameters :
+STRUCT
+	pitchRow	: LREAL; // := 0.0250;
+	pitchColumn	: LREAL; //  := 0.0219;
+	calibrationDistance	: LREAL; // := 3;
+	angle		: LREAL; // := 27.65;
+END_STRUCT
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

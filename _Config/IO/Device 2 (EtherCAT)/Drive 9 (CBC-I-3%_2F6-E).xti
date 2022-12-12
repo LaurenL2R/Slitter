@@ -1,0 +1,44 @@
+<?xml version="1.0"?>
+<TcSmItem xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.beckhoff.com/schemas/2012/07/TcSmProject" TcSmVersion="1.0" TcVersion="3.1.4024.20" ClassName="CFlbTermDef" SubType="9099">
+	<ImageDatas>
+		<ImageData Id="1000">424de6000000000000007600000028000000100000000e000000010004000000000070000000741200007412000000000000000000000000000000008000008000000080800080000000800080008080000080808000c0c0c0000000ff0000ff000000ffff00ff000000ff00ff00ffff0000ffffff00fffffffffffffffffffffffffffffffffffffffffffffff8ffffffffffff88ee788fffffff8eeeee77777788eeeeeeee777777eeeeee88ee7777eeeee8fff8ee7eeeeeeefff8eeeeeeeee8fffff8eeeeee88ffffffffff8e8fffffffffffffffffffffffffffffffffffffffffffffff</ImageData>
+	</ImageDatas>
+	<Box Id="18" BoxType="9099">
+		<Name>Drive 9 (CBC-I-3/6-E)</Name>
+		<ImageId>1000</ImageId>
+		<EtherCAT SlaveType="2" PdiType="#x3680" MboxDataLinkLayer="true" StateMBoxPolling="true" CycleMBoxPollingTime="0" CoeType="47" EoeType="1" FoeType="1" VendorId="#x0000029c" ProductCode="#x00000116" RevisionNo="#x00010004" InfoDataAddr="true" InfoDataSoeDS401="true" EnableWdDivider0400="true" EnableWdTime0420="true" TimeoutStateChange1="1000" TimeoutStateChange2="5000" TimeoutStateChange3="1000" TimeoutMailbox2="2000" PortPhys="17" MaxSlotCount="256" MaxSlotGroupCount="1" SlotPdoIncrement="1" SlotIndexIncrement="16" Type="CBC-I-3/6-E" Desc="CBC-I-3/6-E">
+			<SyncMan>0040140126000100010000002200ce051401004026010000</SyncMan>
+			<SyncMan>0048140122000100020000002200ce051401004822010000</SyncMan>
+			<SyncMan>001006006400010003000000000000000000001064000000</SyncMan>
+			<SyncMan>002808002000010004000000000000000000002820000000</SyncMan>
+			<Fmmu>0000000000000000001000020100000001000000000000000000000000000000</Fmmu>
+			<Fmmu>0000000000000000002800010100000002000000000000000000000000000000</Fmmu>
+			<Fmmu>00000000000000000d0800010100000003000000000000000000000000000000</Fmmu>
+			<SwitchPortData>00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000</SwitchPortData>
+			<BootStrapData>0040000400480004</BootStrapData>
+			<DcMode>4672656552756e000000000000000000467265652052756e000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000</DcMode>
+			<DcMode>446353796e6300000000000000000000444320666f722073796e6368726f6e697a6174696f6e0000000000000000000000000000000000000000000000000003010000000000fdff000000000000000000000000000000000000000000000000</DcMode>
+			<MBoxUserCmdData>02000300090000001200000003000000000000000000000000000000000000002060600001000000084d6f646573206f66206f7065726174696f6e00</MBoxUserCmdData>
+			<Pdo Name="Transmit PDO Mapping" Index="#x1a00" Flags="#x0000" SyncMan="3">
+				<Entry Name="Statusword" Index="#x6041">
+					<Type>UINT</Type>
+				</Entry>
+				<Entry Name="Position actual value" Index="#x6064">
+					<Type>DINT</Type>
+				</Entry>
+				<Entry Name="Torque actual value" Index="#x6077">
+					<Type>INT</Type>
+				</Entry>
+			</Pdo>
+			<Pdo Name="Receive PDO Mapping" Index="#x1600" InOut="1" Flags="#x0000" SyncMan="2">
+				<Entry Name="Controlword" Index="#x6040">
+					<Type>UINT</Type>
+				</Entry>
+				<Entry Name="Target position" Index="#x607a">
+					<Type>DINT</Type>
+				</Entry>
+			</Pdo>
+			<CoeProfile ProfileNo="402"/>
+		</EtherCAT>
+	</Box>
+</TcSmItem>

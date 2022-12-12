@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<TcEventSources Version="2">
+	<Source>
+		<GUID>{AB213F75-B225-47D5-8711-79D0C9807E2B}</GUID>
+		<Name LcId="1033">Slitter Events</Name>
+		<Event>
+			<Id>1</Id>
+			<Message LcId="1033">Parameters: {0} Changed from {1} to {2}</Message>
+		</Event>
+		<Event>
+			<Id>2</Id>
+			<Message LcId="1033">{0} parameters loaded from config file</Message>
+		</Event>
+		<Event>
+			<Id>3</Id>
+			<Message LcId="1033">Parameters saved to config file</Message>
+		</Event>
+		<Event>
+			<Id>4</Id>
+			<Message LcId="1033">Tube {0} Parameter {1} changed from {2} to {3}</Message>
+		</Event>
+		<Event>
+			<Id>5</Id>
+			<Message LcId="1033">Ejector Z Axis Retract Error</Message>
+		</Event>
+		<Event>
+			<Id>6</Id>
+			<Message LcId="1033">Ejector Z Axis Extend Error</Message>
+		</Event>
+		<Event>
+			<Id>7</Id>
+			<Message LcId="1033">Ejector Axis Error: {0}</Message>
+		</Event>
+	</Source>
+</TcEventSources>

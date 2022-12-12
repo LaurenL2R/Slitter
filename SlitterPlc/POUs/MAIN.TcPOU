@@ -1,0 +1,709 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.9">
+  <POU Name="MAIN" Id="{8f3c7fd0-6d9b-4406-902d-14a13902ae94}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM MAIN
+VAR PERSISTENT
+	TubeSelection		: ARRAY[1..5] OF ST_TubeParameters; // array of tube parameters saved in memory
+END_VAR
+VAR
+	CutOffValve	AT %Q*	: BOOL;
+	Tube				: ST_TubeParameters;		// parameters in use by the machine
+	TubeHmi				: ST_TubeParameters;		// parameters to edit in the hmi
+	
+	TubeIndicator		: ARRAY[1..5] OF BOOL := [TRUE, FALSE, FALSE, FALSE, FALSE];		// indicator as to which tube is in use
+	
+	fbSlitter			: FB_Slitter;				// object of machine
+	Frame				: FB_Frame;	
+	eCommand			: Tc3_PackML_V2.E_PMLCommand;
+	eModeCommand		: DINT := E_PMLProtectedUnitMode.ePMLProtUnitMode_Production;
+	eState				: Tc3_PackML_V2.E_PMLState;
+	sState				: STRING;
+	eMode				: DINT;
+
+	TONhmi				: TON;
+	TONidle				: TON := (PT := T#2M);
+	ntStartProcess		: NT_StartProcess;
+
+	bSave				: BOOL;
+	bProcessing			: BOOL;
+	bFailed				: BOOL;
+	bPassed				: BOOL;
+	fbWritePersistent	: FB_WritePersistentData;
+
+	i					: INT;
+	
+	bOperation			: BOOL;
+	bManual				: BOOL;
+	bProductSettings	: BOOL;
+	bMachineSettings	: BOOL;
+	hmiStatus			: STRING := 'OK';
+	PressureOn			: BOOL;
+	PressureOnTon		: TON := (PT := T#10S);
+	PressureOffTon		: TON := (PT := T#2s);
+	hmiReset			: BOOL;
+	bInspect			: BOOL;
+	bNoDetect			: BOOL;
+	InspectCommands		: ST_InspectCommands;
+	
+	currentUser: WSTRING;
+	actualCurrentUser: WSTRING;
+	debug1			: INT;
+	debug2			: INT;
+	nIndex			: INT;
+	j				: INT;
+	readTubeParameter	: ST_TubeParameters;
+	emptyTubeParameter	: ST_TubeParameters;
+	FilesLoaded		: BOOL;
+	rTrigWriteFiles	: R_TRIG;
+	nWriteFiles		: INT;
+	fbXmlSrvRead	: FB_XmlSrvRead;
+	fbXmlSrvWrite	: FB_XmlSrvWrite;
+	fbMessage		: FB_TcMessage;
+	x : INT;
+END_VAR
+VAR PERSISTENT	
+	iBatch				: ULINT;
+	iCounter			: ULINT;
+	iCountFailed		: UINT;
+	hmiBatch			: ULINT;
+	CycleCounter		: LREAL;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[CutOffValve := TRUE;
+
+// set up the event logger message
+IF NOT fbMessage.EqualsToEventEntryEx(stOther := TC_EVENTS.SlitterEvents.TubeParameterChange) THEN
+	fbMessage.CreateEx(TC_EVENTS.SlitterEvents.TubeParameterChange, 0);
+	fbMessage.ipArguments.Clear();
+END_IF
+
+// load the config parameters on start up
+A_ReadTubeParameters();
+
+// display the current user
+IF currentUser <> VisuElems.CurrentFullUserName THEN
+	currentUser := VisuElems.CurrentFullUserName;
+END_IF
+
+IF bOperation THEN				// when switching to the Operation page
+	bOperation := FALSE;
+	FOR i:=1 TO 5 DO
+		TubeIndicator[i] := FALSE;
+	END_FOR
+	TubeIndicator[1] := TRUE;
+	Tube := TubeSelection[1];	// set the tube selection to the first tube on entering page
+	TubeHmi := Tube;			// write the parameters to the HMI display
+END_IF
+
+IF bManual THEN
+	bManual := FALSE;
+	TubeHmi := Tube;	// write the parameters to the HMI display
+						// do not change the selected tube
+END_IF
+
+IF bProductSettings THEN
+	bProductSettings := FALSE;
+	FOR i:=1 TO 5 DO
+		TubeIndicator[i] := FALSE;
+	END_FOR
+	TubeIndicator[1] := TRUE;
+	Tube := TubeSelection[1];	// on entering product page select the first tube
+	TubeHmi := Tube;			// write the parameters to the HMI display
+END_IF
+
+IF bMachineSettings THEN
+	bMachineSettings := FALSE;
+	TubeHmi := Tube;
+END_IF
+
+//A_StartVisualization();
+A_PackMlCommands();
+
+// this must be called before the fbSlitter execution
+// determines the tube that is selected 
+FOR i := 1 TO 5 DO
+	IF TubeIndicator[i] THEN
+		Tube := TubeSelection[i];
+	END_IF
+END_FOR
+
+// machine object
+fbSlitter(
+	eCommand := eCommand,
+	eModeCommand := eModeCommand,
+	Batch := hmiBatch,
+	Tube := Tube,
+	TubeHmi := TubeHmi,	// used only for manual commands
+	Inspect := bInspect,
+	InspectCmd := InspectCommands,
+	CounterOut => iCounter,
+	CountFailedOut => iCountFailed,
+	BatchOut => iBatch,
+	eState => eState,
+	sState => sState,
+	eMode => eMode);
+
+IF eState <> E_PMLState.ePMLState_Undefined THEN
+	A_MonitorParameters();
+	A_WriteParameters();
+END_IF	
+A_StatusIndicator();
+(*		
+FOR i := 1 TO 5 DO
+	IF TubeIndicator[i] THEN
+		debug2 := debug2 + 1;		
+		IF MEMCMP(ADR(Tube), ADR(TubeSelection[i]), SIZEOF(tube)) <> 0 THEN
+			TubeHmi := Tube;		
+			bSave := TRUE;
+			debug1 := debug1 + 1;
+		END_IF 
+	END_IF
+END_FOR
+*)
+]]></ST>
+    </Implementation>
+    <Action Name="A_MonitorParameters" Id="{11b27928-fe1e-4d76-9e99-f24f8c688575}">
+      <Implementation>
+        <ST><![CDATA[IF MEMCMP(ADR(TubeHmi), ADR(TubeSelection[i]), SIZEOF(TubeHmi)) <> 0 THEN
+	IF TubeHmi.AdjustmentLength <> TubeSelection[i].AdjustmentLength THEN
+		// Tube {0} Parameter {1} changed from {2} to {3}
+		fbMessage.ipArguments.Clear();
+		fbMessage.ipArguments.AddInt(i).AddString('AdjustmentLength');
+		fbMessage.ipArguments.AddLReal(TubeSelection[i].AdjustmentLength).AddLReal(TubeHmi.AdjustmentLength);
+		fbMessage.Send(0);
+	END_IF
+	IF TubeHmi.AdjustmentX <> TubeSelection[i].AdjustmentX THEN
+		fbMessage.ipArguments.Clear();
+		fbMessage.ipArguments.AddInt(i).AddString('AdjustmentX');
+		fbMessage.ipArguments.AddLReal(TubeSelection[i].AdjustmentX).AddLReal(TubeHmi.AdjustmentX);
+		fbMessage.Send(0);				
+	END_IF
+	IF TubeHmi.AdjustmentY <> TubeSelection[i].AdjustmentY THEN
+		fbMessage.ipArguments.Clear();
+		fbMessage.ipArguments.AddInt(i).AddString('AdjustmentY');
+		fbMessage.ipArguments.AddLReal(TubeSelection[i].AdjustmentY).AddLReal(TubeHmi.AdjustmentY);
+		fbMessage.Send(0);								
+	END_IF
+	IF TubeHmi.CutPositionX <> TubeSelection[i].CutPositionX THEN
+		fbMessage.ipArguments.Clear();
+		fbMessage.ipArguments.AddInt(i).AddString('CutPositionX');
+		fbMessage.ipArguments.AddLReal(TubeSelection[i].CutPositionX).AddLReal(TubeHmi.CutPositionX);
+		fbMessage.Send(0);												
+	END_IF
+	IF TubeHmi.CutPositionY <> TubeSelection[i].CutPositionY THEN
+		fbMessage.ipArguments.Clear();
+		fbMessage.ipArguments.AddInt(i).AddString('CutPositionY');
+		fbMessage.ipArguments.AddLReal(TubeSelection[i].CutPositionY).AddLReal(TubeHmi.CutPositionY);
+		fbMessage.Send(0);																
+	END_IF
+	IF TubeHmi.DepthOfPocket <> TubeSelection[i].DepthOfPocket THEN
+		fbMessage.ipArguments.Clear();
+		fbMessage.ipArguments.AddInt(i).AddString('DepthOfPocket');
+		fbMessage.ipArguments.AddLReal(TubeSelection[i].DepthOfPocket).AddLReal(TubeHmi.DepthOfPocket);
+		fbMessage.Send(0);																				
+	END_IF
+	IF TubeHmi.Description <> TubeSelection[i].Description THEN
+		fbMessage.ipArguments.Clear();
+		fbMessage.ipArguments.AddInt(i).AddString('Description');
+		fbMessage.ipArguments.AddString(TubeSelection[i].Description).AddStringByValue(TubeHmi.Description);
+		fbMessage.Send(0);																								
+	END_IF
+	IF TubeHmi.Diameter <> TubeSelection[i].Diameter THEN
+		fbMessage.ipArguments.Clear();
+		fbMessage.ipArguments.AddInt(i).AddString('Diameter');
+		fbMessage.ipArguments.AddLReal(TubeSelection[i].Diameter).AddLReal(TubeHmi.Diameter);
+		fbMessage.Send(0);																												
+	END_IF
+	IF TubeHmi.EjectPositionX <> TubeSelection[i].EjectPositionX THEN
+		fbMessage.ipArguments.Clear();
+		fbMessage.ipArguments.AddInt(i).AddString('EjectPositionX');
+		fbMessage.ipArguments.AddLReal(TubeSelection[i].EjectPositionX).AddLReal(TubeHmi.EjectPositionX);
+		fbMessage.Send(0);																												
+	END_IF	
+	IF TubeHmi.EjectPositionY <> TubeSelection[i].EjectPositionY THEN
+		fbMessage.ipArguments.Clear();
+		fbMessage.ipArguments.AddInt(i).AddString('EjectPositionY');
+		fbMessage.ipArguments.AddLReal(TubeSelection[i].EjectPositionY).AddLReal(TubeHmi.EjectPositionY);
+		fbMessage.Send(0);																												
+	END_IF
+	IF TubeHmi.InspectPositionX <> TubeSelection[i].InspectPositionX THEN
+		fbMessage.ipArguments.Clear();
+		fbMessage.ipArguments.AddInt(i).AddString('InspectPositionX');
+		fbMessage.ipArguments.AddLReal(TubeSelection[i].InspectPositionX).AddLReal(TubeHmi.InspectPositionX);
+		fbMessage.Send(0);																																
+	END_IF
+	IF TubeHmi.InspectPositionY <> TubeSelection[i].InspectPositionY THEN
+		fbMessage.ipArguments.Clear();
+		fbMessage.ipArguments.AddInt(i).AddString('InspectPositionY');
+		fbMessage.ipArguments.AddLReal(TubeSelection[i].InspectPositionY).AddLReal(TubeHmi.InspectPositionY);
+		fbMessage.Send(0);																																				
+	END_IF
+	IF TubeHmi.MaxHeight <> TubeSelection[i].MaxHeight THEN
+		fbMessage.ipArguments.Clear();
+		fbMessage.ipArguments.AddInt(i).AddString('MaxHeight');
+		fbMessage.ipArguments.AddLReal(TubeSelection[i].MaxHeight).AddLReal(TubeHmi.MaxHeight);
+		fbMessage.Send(0);																																								
+	END_IF
+	IF TubeHmi.MaxLength <> TubeSelection[i].MaxLength THEN
+		fbMessage.ipArguments.Clear();
+		fbMessage.ipArguments.AddInt(i).AddString('MaxLength');
+		fbMessage.ipArguments.AddLReal(TubeSelection[i].MaxLength).AddLReal(TubeHmi.MaxLength);
+		fbMessage.Send(0);																																												
+	END_IF
+	IF TubeHmi.MinHeight <> TubeSelection[i].MinHeight THEN
+		fbMessage.ipArguments.Clear();
+		fbMessage.ipArguments.AddInt(i).AddString('MinHeight');
+		fbMessage.ipArguments.AddLReal(TubeSelection[i].MinHeight).AddLReal(TubeHmi.MinHeight);
+		fbMessage.Send(0);																																																
+	END_IF
+	IF TubeHmi.MinLength <> TubeSelection[i].MinLength THEN
+		fbMessage.ipArguments.Clear();
+		fbMessage.ipArguments.AddInt(i).AddString('MinLength');
+		fbMessage.ipArguments.AddLReal(TubeSelection[i].MinLength).AddLReal(TubeHmi.MinLength);
+		fbMessage.Send(0);																																																				
+	END_IF
+	IF TubeHmi.ProductName <> TubeSelection[i].ProductName THEN
+		fbMessage.ipArguments.Clear();
+		fbMessage.ipArguments.AddInt(i).AddString('ProductName');
+		fbMessage.ipArguments.AddString(TubeSelection[i].ProductName).AddString(TubeHmi.ProductName);
+		fbMessage.Send(0);																																																				
+	END_IF
+	IF TubeHmi.ResultToleranceX <> TubeSelection[i].ResultToleranceX THEN
+		fbMessage.ipArguments.Clear();
+		fbMessage.ipArguments.AddInt(i).AddString('ResultToleranceX');
+		fbMessage.ipArguments.AddLReal(TubeSelection[i].ResultToleranceX).AddLReal(TubeHmi.ResultToleranceX);
+		fbMessage.Send(0);																																																				
+	END_IF
+	IF TubeHmi.ResultToleranceY <> TubeSelection[i].ResultToleranceY THEN
+		fbMessage.ipArguments.Clear();
+		fbMessage.ipArguments.AddInt(i).AddString('ResultToleranceY');
+		fbMessage.ipArguments.AddLReal(TubeSelection[i].ResultToleranceY).AddLReal(TubeHmi.ResultToleranceY);
+		fbMessage.Send(0);																																																								
+	END_IF
+	IF TubeHmi.VacuumThreshold <> TubeSelection[i].VacuumThreshold THEN
+		fbMessage.ipArguments.Clear();
+		fbMessage.ipArguments.AddInt(i).AddString('VacuumThreshold');
+		fbMessage.ipArguments.AddLReal(TubeSelection[i].VacuumThreshold).AddLReal(TubeHmi.VacuumThreshold);
+		fbMessage.Send(0);																																																								
+	END_IF
+END_IF 
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_PackMlCommands" Id="{7dff5ef5-514a-4270-badc-d4173046ca34}">
+      <Implementation>
+        <ST><![CDATA[PressureOffTon(IN := frame.Pressure < 80);
+IF PressureOffTon.Q THEN
+	PressureOn := FALSE;
+END_IF
+PressureOnTON(IN := frame.Pressure > 80);
+IF PressureOnTON.Q THEN
+	PressureOn := TRUE;
+END_IF
+
+// pack ml commands
+IF (NOT PressureOn OR hmiReset) AND FilesLoaded THEN
+ 	eCommand := E_PMLCommand.ePMLCommand_Abort;
+	hmiReset := FALSE;
+	IF NOT PressureOn THEN
+		hmiStatus := 'Pressure<80PSIG';
+	END_IF
+ELSIF eMode = E_PMLProtectedUnitMode.ePMLProtUnitMode_Manual THEN
+	hmiStatus := 'Manual Mode';
+	IF eModeCommand = E_PMLProtectedUnitMode.ePMLProtUnitMode_Production THEN
+		eCommand := E_PMLCommand.ePMLCommand_Abort;
+		Frame.GreenLight := FALSE;
+	ELSE
+		CASE eState OF
+			E_PMLState.ePMLState_Undefined: eCommand := E_PMLCommand.ePMLCommand_Abort;
+			E_PMLState.ePMLState_Aborted: eCommand := E_PMLCommand.ePMLCommand_Clear;
+			E_PMLState.ePMLState_Idle: eCommand := E_PMLCommand.ePMLCommand_Start;
+			E_PMLState.ePMLState_Stopped: eCommand := E_PMLCommand.ePMLCommand_Reset;
+			E_PMLState.ePMLState_Aborting: eCommand := E_PMLCommand.ePMLCommand_Undefined;
+		END_CASE
+	END_IF
+ELSIF eMode = E_PMLProtectedUnitMode.ePMLProtUnitMode_Production THEN
+	hmiStatus := 'Automatic Mode';
+	IF eModeCommand = E_PMLProtectedUnitMode.ePMLProtUnitMode_Manual THEN
+		eCommand := E_PMLCommand.ePMLCommand_Abort;
+	ELSE
+		CASE eState OF
+			E_PMLState.ePMLState_Undefined:
+				IF FilesLoaded THEN
+					eCommand := E_PMLCommand.ePMLCommand_Abort;
+				END_IF
+			E_PMLState.ePMLState_Aborted:  
+				//IF NOT Frame.Door1 AND NOT Frame.Door2 THEN
+					eCommand := E_PMLCommand.ePMLCommand_Clear;
+				//END_IF
+			E_PMLState.ePMLState_Idle:
+					Frame.GreenLight := Frame.Door1 AND Frame.Door2 AND Frame.Door3 AND Frame.Door4;
+					IF Frame.GreenLight THEN
+						hmiStatus := 'Ready';
+					ELSE
+						hmiStatus := 'Door Open';
+					END_IF
+					IF (Frame.ControlLeft AND Frame.ControlRight) AND Frame.GreenLight THEN
+						eCommand := E_PMLCommand.ePMLCommand_Start;
+						Frame.GreenLight := FALSE;
+					END_IF
+			E_PMLState.ePMLState_Complete: eCommand := E_PMLCommand.ePMLCommand_Reset;
+														
+			E_PMLState.ePMLState_Stopped: eCommand := E_PMLCommand.ePMLCommand_Reset;
+			E_PMLState.ePMLState_Aborting: eCommand := E_PMLCommand.ePMLCommand_Undefined;			
+		END_CASE
+	END_IF
+END_IF
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_ReadTubeParameters" Id="{08beef19-af36-40fc-994a-42f92c970fef}">
+      <Implementation>
+        <ST><![CDATA[x := x + 1;
+
+CASE nIndex OF
+	0: // read the info from the config file for the camera
+		j := 1;
+		nIndex := 10;
+	10: // 
+		fbXmlSrvRead.sXPath := CONCAT('/Configuration/TubeParameters/Tube', INT_TO_STRING(j));
+		fbXmlSrvRead.pSymAddr := ADR(readTubeParameter);
+		fbXmlSrvRead.cbSymSize := SIZEOF(readTubeParameter);
+		fbXmlSrvRead.bExecute := TRUE;
+		nIndex := 20;
+	20: // wait for the info to load
+		IF NOT fbXmlSrvRead.bBusy THEN
+			fbXmlSrvRead.bExecute := FALSE;
+			MEMCPY(ADR(TubeSelection[j]), ADR(readTubeParameter), SIZEOF(readTubeParameter));
+			MEMCPY(ADR(readTubeParameter), ADR(emptyTubeParameter), SIZEOF(emptyTubeParameter));
+			nIndex := 30;
+			IF j >= 5 THEN
+				nIndex := 30;
+			ELSE
+				nIndex := 10;
+				j := j + 1;
+			END_IF
+		END_IF
+	30: // set variables
+		Tube := TubeSelection[1];
+		TubeHmi := TubeSelection[1];
+		TubeIndicator[1] := TRUE;
+		bProcessing := FALSE;
+		bPassed := FALSE;
+		bFailed := FALSE;
+		bNoDetect := FALSE;
+		nIndex := 40;
+	40: // wait here for files loaded
+		IF fbSlitter.ReadParameters(Execute := TRUE) THEN
+			fbSlitter.ReadParameters(Execute := FALSE);
+			FilesLoaded := TRUE;
+			nIndex := 50;
+		END_IF
+	50: // 
+		
+END_CASE
+
+fbXmlSrvRead(
+	sNetId:= '', 
+	ePath:= E_OpenPath.PATH_GENERIC, 
+	nMode:= XMLSRV_SKIPMISSING, 
+	sFilePath:= 'C:\Configuration.xml');
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_StartVisualization" Id="{28a6a13c-0164-45f7-82c3-d3ce337639c7}">
+      <Implementation>
+        <ST><![CDATA[// start the hmi
+
+TONhmi(IN := TRUE, PT := T#4S);
+IF TONhmi.Q THEN
+	ntStartProcess(
+		NETID := '',
+		PATHSTR := 'C:\TwinCAT\3.1\Components\Plc\Tc3PlcHmi\Tc3PlcHmi.exe',
+		DIRNAME := 'C:\TwinCAT\3.1\Components\Plc\Tc3PlcHmi\',
+		COMNDLINE := 'Tc3PlcHmi.exe',
+		START := TRUE);
+END_IF
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_StatusIndicator" Id="{fa378544-fe8e-49fa-b056-a4700d79bbe0}">
+      <Implementation>
+        <ST><![CDATA[// status indicator
+
+IF eMode = E_PMLProtectedUnitMode.ePMLProtUnitMode_Production THEN
+	CASE fbSlitter.Status OF
+		0: // idle if idle is on for more than 2 minutes, remove the result
+			TONidle(IN := TRUE);
+			bProcessing := FALSE;
+			IF TONidle.Q THEN
+				bFailed := FALSE;
+				bPassed := FALSE;	
+				bNoDetect := FALSE;		
+			END_IF
+		1: // processing
+			bProcessing := TRUE;
+			bFailed := FALSE;
+			bPassed := FALSE;
+			bNoDetect := FALSE;
+			TONidle(IN := FALSE);
+		2: // pass
+			bPassed := TRUE;
+			bFailed := FALSE;
+			bProcessing := FALSE;
+			bNoDetect := FALSE;
+		3: // fail	
+			bPassed := FALSE;
+			bFailed := TRUE;
+			bProcessing := FALSE;
+			bNoDetect := FALSE;
+		4: // failed to detect
+			bPassed := FALSE;
+			bFailed := FALSE;
+			bProcessing := FALSE;
+			bNoDetect := TRUE;		
+	END_CASE
+ELSE
+	bPassed := FALSE;
+	bFailed := FALSE;
+	bProcessing := FALSE;
+END_IF
+]]></ST>
+      </Implementation>
+    </Action>
+    <Action Name="A_WriteParameters" Id="{09528414-ba2a-4def-9a55-fdd92ee4ec57}">
+      <Implementation>
+        <ST><![CDATA[// write persistent data 
+rTrigWriteFiles(CLK := bSave);
+IF rTrigWriteFiles.Q THEN
+	fbSlitter.SaveParameters(Execute := FALSE);
+	nWriteFiles := 10;
+END_IF
+
+IF NOT bSave THEN
+	nWriteFiles := 0;
+END_IF
+
+CASE nWriteFiles OF
+	10: // get the tube into memory
+		FOR i := 1 TO 5 DO
+			IF TubeIndicator[i] THEN
+				A_MonitorParameters();
+				TubeSelection[i] := TubeHmi;
+				TubeSelection[i].Index := i;
+			END_IF
+		END_FOR
+		j := 1;
+		nWriteFiles := 20;
+	20: // write the tube parameters
+		MEMCPY(ADR(readTubeParameter), ADR(TubeSelection[j]), SIZEOF(readTubeParameter));
+		fbXmlSrvWrite.bExecute := TRUE;
+		fbXmlSrvWrite.cbSymSize := SIZEOF(readTubeParameter);
+		fbXmlSrvWrite.pSymAddr := ADR(readTubeParameter);
+		fbXmlSrvWrite.sXPath := CONCAT('/Configuration/TubeParameters/Tube', INT_TO_STRING(j));
+		nWriteFiles := 30;
+	30: // wait to complete
+		IF NOT fbXmlSrvWrite.bBusy THEN
+			fbXmlSrvWrite.bExecute := FALSE;
+			IF j >= 5 THEN
+				nWriteFiles := 40;
+			ELSE
+				j := j + 1;
+				nWriteFiles := 20;
+			END_IF
+		END_IF
+	40: // command slitter to save parameters
+		IF fbSlitter.SaveParameters(Execute := TRUE) THEN
+			fbSlitter.SaveParameters(Execute := FALSE);
+			nWriteFiles := 50;
+		END_IF
+	50: // done state
+		bSave := FALSE;
+END_CASE
+
+fbXmlSrvWrite(
+	sNetId:= '', 
+	ePath:= E_OpenPath.PATH_GENERIC, 
+	nMode:= XMLSRV_SKIPMISSING, 
+	sFilePath:= 'C:\Configuration.xml');
+
+]]></ST>
+      </Implementation>
+    </Action>
+    <LineIds Name="MAIN">
+      <LineId Id="675" Count="1" />
+      <LineId Id="655" Count="0" />
+      <LineId Id="650" Count="0" />
+      <LineId Id="652" Count="0" />
+      <LineId Id="654" Count="0" />
+      <LineId Id="653" Count="0" />
+      <LineId Id="656" Count="0" />
+      <LineId Id="651" Count="0" />
+      <LineId Id="503" Count="0" />
+      <LineId Id="657" Count="0" />
+      <LineId Id="504" Count="17" />
+      <LineId Id="672" Count="0" />
+      <LineId Id="522" Count="13" />
+      <LineId Id="678" Count="0" />
+      <LineId Id="536" Count="2" />
+      <LineId Id="540" Count="2" />
+      <LineId Id="673" Count="0" />
+      <LineId Id="543" Count="20" />
+      <LineId Id="647" Count="0" />
+      <LineId Id="564" Count="0" />
+      <LineId Id="648" Count="0" />
+      <LineId Id="659" Count="0" />
+      <LineId Id="649" Count="0" />
+      <LineId Id="579" Count="1" />
+      <LineId Id="661" Count="8" />
+      <LineId Id="671" Count="0" />
+      <LineId Id="660" Count="0" />
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="MAIN.A_MonitorParameters">
+      <LineId Id="7" Count="0" />
+      <LineId Id="17" Count="0" />
+      <LineId Id="21" Count="0" />
+      <LineId Id="19" Count="0" />
+      <LineId Id="22" Count="2" />
+      <LineId Id="20" Count="0" />
+      <LineId Id="18" Count="0" />
+      <LineId Id="27" Count="3" />
+      <LineId Id="26" Count="0" />
+      <LineId Id="31" Count="0" />
+      <LineId Id="34" Count="3" />
+      <LineId Id="33" Count="0" />
+      <LineId Id="38" Count="0" />
+      <LineId Id="41" Count="3" />
+      <LineId Id="40" Count="0" />
+      <LineId Id="45" Count="0" />
+      <LineId Id="48" Count="3" />
+      <LineId Id="47" Count="0" />
+      <LineId Id="52" Count="0" />
+      <LineId Id="55" Count="3" />
+      <LineId Id="54" Count="0" />
+      <LineId Id="59" Count="0" />
+      <LineId Id="62" Count="3" />
+      <LineId Id="61" Count="0" />
+      <LineId Id="66" Count="0" />
+      <LineId Id="69" Count="3" />
+      <LineId Id="68" Count="0" />
+      <LineId Id="73" Count="0" />
+      <LineId Id="76" Count="3" />
+      <LineId Id="74" Count="0" />
+      <LineId Id="80" Count="0" />
+      <LineId Id="83" Count="3" />
+      <LineId Id="82" Count="0" />
+      <LineId Id="87" Count="0" />
+      <LineId Id="90" Count="3" />
+      <LineId Id="89" Count="0" />
+      <LineId Id="94" Count="0" />
+      <LineId Id="97" Count="3" />
+      <LineId Id="96" Count="0" />
+      <LineId Id="101" Count="0" />
+      <LineId Id="104" Count="3" />
+      <LineId Id="103" Count="0" />
+      <LineId Id="108" Count="0" />
+      <LineId Id="111" Count="3" />
+      <LineId Id="110" Count="0" />
+      <LineId Id="115" Count="0" />
+      <LineId Id="118" Count="3" />
+      <LineId Id="117" Count="0" />
+      <LineId Id="122" Count="0" />
+      <LineId Id="125" Count="3" />
+      <LineId Id="124" Count="0" />
+      <LineId Id="129" Count="0" />
+      <LineId Id="132" Count="3" />
+      <LineId Id="130" Count="0" />
+      <LineId Id="136" Count="0" />
+      <LineId Id="139" Count="3" />
+      <LineId Id="137" Count="0" />
+      <LineId Id="143" Count="0" />
+      <LineId Id="146" Count="3" />
+      <LineId Id="145" Count="0" />
+      <LineId Id="150" Count="0" />
+      <LineId Id="153" Count="3" />
+      <LineId Id="151" Count="0" />
+      <LineId Id="157" Count="0" />
+      <LineId Id="3" Count="0" />
+    </LineIds>
+    <LineIds Name="MAIN.A_PackMlCommands">
+      <LineId Id="65" Count="0" />
+      <LineId Id="55" Count="6" />
+      <LineId Id="54" Count="0" />
+      <LineId Id="2" Count="27" />
+      <LineId Id="62" Count="2" />
+      <LineId Id="30" Count="21" />
+      <LineId Id="1" Count="0" />
+    </LineIds>
+    <LineIds Name="MAIN.A_ReadTubeParameters">
+      <LineId Id="55" Count="1" />
+      <LineId Id="1" Count="0" />
+      <LineId Id="12" Count="0" />
+      <LineId Id="24" Count="2" />
+      <LineId Id="13" Count="7" />
+      <LineId Id="36" Count="0" />
+      <LineId Id="57" Count="0" />
+      <LineId Id="22" Count="0" />
+      <LineId Id="28" Count="1" />
+      <LineId Id="31" Count="2" />
+      <LineId Id="30" Count="0" />
+      <LineId Id="23" Count="0" />
+      <LineId Id="34" Count="0" />
+      <LineId Id="40" Count="9" />
+      <LineId Id="54" Count="0" />
+      <LineId Id="50" Count="0" />
+      <LineId Id="52" Count="0" />
+      <LineId Id="51" Count="0" />
+      <LineId Id="53" Count="0" />
+      <LineId Id="35" Count="0" />
+      <LineId Id="3" Count="0" />
+      <LineId Id="5" Count="5" />
+      <LineId Id="4" Count="0" />
+    </LineIds>
+    <LineIds Name="MAIN.A_StartVisualization">
+      <LineId Id="2" Count="10" />
+      <LineId Id="1" Count="0" />
+    </LineIds>
+    <LineIds Name="MAIN.A_StatusIndicator">
+      <LineId Id="41" Count="38" />
+      <LineId Id="1" Count="0" />
+    </LineIds>
+    <LineIds Name="MAIN.A_WriteParameters">
+      <LineId Id="2" Count="0" />
+      <LineId Id="22" Count="1" />
+      <LineId Id="80" Count="0" />
+      <LineId Id="24" Count="1" />
+      <LineId Id="45" Count="0" />
+      <LineId Id="44" Count="0" />
+      <LineId Id="46" Count="1" />
+      <LineId Id="26" Count="0" />
+      <LineId Id="21" Count="0" />
+      <LineId Id="27" Count="0" />
+      <LineId Id="31" Count="1" />
+      <LineId Id="81" Count="0" />
+      <LineId Id="33" Count="3" />
+      <LineId Id="42" Count="0" />
+      <LineId Id="40" Count="1" />
+      <LineId Id="78" Count="0" />
+      <LineId Id="37" Count="1" />
+      <LineId Id="59" Count="0" />
+      <LineId Id="58" Count="0" />
+      <LineId Id="60" Count="3" />
+      <LineId Id="72" Count="0" />
+      <LineId Id="65" Count="0" />
+      <LineId Id="73" Count="3" />
+      <LineId Id="64" Count="0" />
+      <LineId Id="66" Count="1" />
+      <LineId Id="79" Count="0" />
+      <LineId Id="68" Count="3" />
+      <LineId Id="28" Count="0" />
+      <LineId Id="49" Count="0" />
+      <LineId Id="48" Count="0" />
+      <LineId Id="54" Count="3" />
+      <LineId Id="43" Count="0" />
+      <LineId Id="1" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>

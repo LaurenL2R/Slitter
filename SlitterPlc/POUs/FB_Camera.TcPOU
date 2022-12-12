@@ -1,0 +1,1544 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.9">
+  <POU Name="FB_Camera" Id="{e29b8acf-c363-459e-aac4-9b2f4b8da33e}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_Camera
+VAR_INPUT
+END_VAR
+VAR_OUTPUT
+END_VAR
+VAR
+	Trigger	AT %Q*			: BOOL;				// signal to take picture and analyze
+	CameraData				: ST_CameraData;	// modbus camera data
+	VisionStatus			: ARRAY[0..3] OF BYTE;// modbus camera status
+	_tubeParameters			: ST_TubeParameters;
+	_pass					: BOOL;
+	_fail					: BOOL;
+	_noDetect				: BOOL;
+			
+	_xPoints 				: ARRAY[1..GVL.NumberVisionPoints] OF LREAL;
+	_yPoints 				: ARRAY[1..GVL.NumberVisionPoints] OF LREAL;
+	_xEllipsePoints			: ARRAY[1..GVL.NumberEllipsePoints] OF LREAL;
+	_yEllipsePoints			: ARRAY[1..GVL.NumberEllipsePoints] OF LREAL;
+		
+	_displayVisionPts		: ARRAY[1..2,1..GVL.NumberVisionPoints] OF LREAL;
+	_displayEllipsePts		: ARRAY[1..2,1..GVL.NumberEllipsePoints] OF LREAL;
+	_columnPeak				: LREAL;	// xPeak value of the vision points
+	_rowPeak				: LREAL;	// yPeak value of the vision points
+	_rowCenterLine			: LREAL;	// based on entered minor value -> y value at the center-line axis
+	_minorCalculated 		: LREAL;
+	_majorCalculated		: LREAL;
+	_xEllipseCenter			: LREAL;
+	_yEllipseCenter			: LREAL;
+
+	(* for calculating the pitch *)	
+	_patternX1				: LREAL;
+	_patternX2				: LREAL;
+	_patternX3				: LREAL;
+	_patternY1				: LREAL;
+	_patternY2				: LREAL;
+	_patternY3				: LREAL;
+	
+	(* calculation variables *)
+	DeltaXpx				: LREAL;	// distance from peak of curve to center of cut (row)
+	DeltaYpx				: LREAL;	// distance from peak of curve to center of cut (column)
+	CutLength				: LREAL;
+	CutHeight				: LREAL;
+	DeltaXmm				: LREAL;
+	DeltaYmm				: LREAL;
+	(* results *)
+	_CutLengthWithOffset	: LREAL;
+	_DeltaXmmWithOffset		: LREAL;
+	_DeltaYmmWithOffset		: LREAL;
+	
+	_depthOffset			: REAL; 				// difference due to the plane of cut is different than plane of pattern detect
+	_minorRadiusMm			: LREAL := 2.5955;		// minor radius of ellipse in mm
+	_majorRadiusMm			: LREAL;
+	_slitCenterApparentRow	: LREAL;				// [px] this is the center of the part in x when accounting for the offset due to vision plane versus cut plane
+	_tubeCenter				: LREAL;
+	_tubeCenterOffset		: LREAL;
+	_tubeCenterWithOffset	: LREAL;
+	_cameraProgram			: STRING;
+	_previousTubeIndex		: INT;
+	
+	_hmiParameters			: ST_CameraParameters;
+	_parameters				: ST_CameraParameters;
+	fbMessageChange			: FB_TcMessage;
+	fbMessageLoaded			: FB_TcMessage;
+END_VAR
+
+
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[]]></ST>
+    </Implementation>
+    <Folder Name="Parameters" Id="{c3f8c6ab-b4bb-432d-94e3-1b6e85c8648c}" />
+    <Property Name="angle" Id="{9837e397-79d0-4c7d-9c41-c597cf42d2a2}" FolderPath="Parameters\">
+      <Declaration><![CDATA[PROPERTY angle : LREAL]]></Declaration>
+      <Get Name="Get" Id="{8d796e00-e9a8-41d8-aa78-baf730d2028b}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[angle := _parameters.angle;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{ccf7781c-4d23-4e7d-a804-57aafb8844c9}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[fbMessageChange.ipArguments.Clear().AddString('Angle').AddLReal(_parameters.angle).AddLReal(angle);
+fbMessageChange.Send(0);
+_parameters.angle := angle;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Method Name="Calibrate" Id="{47bb793d-9a4a-46a0-8f3e-b2726fff7b46}">
+      <Declaration><![CDATA[METHOD Calibrate : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[_hmiParameters.pitchRow := (CalibrationDistance / ABS(PatternY1 - PatternY2));
+_hmiParameters.pitchColumn := (CalibrationDistance / ABS(PatternX2 - PatternX3));
+
+
+]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="CalibrationDistance" Id="{d5b16c9d-22ca-470b-9a6e-4cd0a967eaf7}" FolderPath="Parameters\">
+      <Declaration><![CDATA[PROPERTY CalibrationDistance : LREAL]]></Declaration>
+      <Get Name="Get" Id="{4f7a49bd-d4f7-4486-8398-861beff2278d}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[CalibrationDistance := _parameters.calibrationDistance;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{77981a05-efbd-441b-9460-6e5d2f43a673}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[fbMessageChange.ipArguments.Clear().AddString('Calibration Distance').AddLReal(_parameters.calibrationDistance).AddLReal(CalibrationDistance);
+fbMessageChange.Send(0);
+_parameters.calibrationDistance := CalibrationDistance;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="CameraProgram" Id="{fd3b28ca-4e8a-47f7-8989-29a9cd3cb0b3}">
+      <Declaration><![CDATA[PROPERTY CameraProgram : STRING]]></Declaration>
+      <Get Name="Get" Id="{e3b7765f-f4a0-4831-8af9-5860050b203d}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[CameraProgram := _cameraProgram;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{35833dfc-12e1-42b2-8f0f-62d8d96f08ba}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[_cameraProgram := CameraProgram;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Method Name="Compute" Id="{317c842b-2189-4bec-b370-314b3f33f4a1}">
+      <Declaration><![CDATA[METHOD Compute : INT
+VAR_INPUT
+	Execute		: BOOL;
+END_VAR
+VAR_INST
+	rTrig			: R_TRIG;
+	nIndex			: INT;
+	fbSecond		: FB_SecondOrder;
+ 	fbFourth		: FB_FourthOrder;
+	fbEllipse		: FB_Ellipse;
+	zeroValues		: BOOL;
+END_VAR
+
+VAR
+	i: INT;
+	yValue	: LREAL;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[(* when computing the new cut positions, subtract the delta values from the 
+original cut positions *)
+
+rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	nIndex := 10;
+END_IF
+
+IF NOT Execute THEN
+	nIndex := 0;
+END_IF
+
+CASE nIndex OF
+	0: // idle state
+		Compute := 0;
+	10: // get data
+		IF GetCameraData() = 1 THEN
+			nIndex := 15;
+		END_IF
+	15: // did pattern match find _xPoints, _yPoints?
+		zeroValues := FALSE;
+		FOR i := 1 TO GVL.NumberVisionPoints DO
+			IF _xPoints[i] = 0 OR _yPoints[i] = 0 THEN
+				zeroValues := TRUE;
+			END_IF
+		END_FOR
+		IF zeroValues THEN
+			nIndex := 60;
+		ELSE
+			nIndex := 20;
+		END_IF
+	20: // compute the peak x value of the data		
+		fbSecond.FindPeak(xValues := ADR(_xPoints), yValues := ADR(_yPoints), xPeak := ADR(_columnPeak));
+		fbFourth.FindYatX(xValues := ADR(_xPoints), yValues := ADR(_yPoints), xPeak := ADR(_columnPeak), yPeak := ADR(_rowPeak));
+		DeltaYpx := CameraData.Results.LocationInX - _columnPeak;
+		DeltaYmm := DeltaYpx * _hmiParameters.pitchColumn;
+		_DeltaYmmWithOffset := DeltaYmm + _tubeParameters.AdjustmentY;
+		
+		CutLength := CameraData.Results.WidthMeasurement * _hmiParameters.pitchColumn;		
+		_CutLengthWithOffset := CutLength + _tubeParameters.AdjustmentLength;
+		CutHeight := CameraData.Results.HeightMeasurement * _hmiParameters.pitchRow;
+		
+		_tubeCenter := _rowPeak + 0.5*_tubeParameters.Diameter /_hmiParameters.pitchRow;
+		_tubeCenterOffset := (_tubeParameters.DepthOfPocket*TAN(_hmiParameters.angle * 2*3.14159/360.0))/_hmiParameters.pitchRow;
+		_tubeCenterWithOffset := _tubeCenter + _tubeCenterOffset;
+		
+		DeltaXpx := (CameraData.Results.LocationInY - 0.5*CameraData.Results.HeightMeasurement) - _tubeCenterWithOffset;
+		DeltaXmm := DeltaXpx * _hmiParameters.pitchRow;
+		_DeltaXmmWithOffset := DeltaXmm + _tubeParameters.AdjustmentX;
+		
+		nIndex := 50;
+	30: // compute ellipse
+		fbEllipse.EllipseFit(xValues := _xEllipsePoints, yValues := _yEllipsePoints);
+		nIndex := 40;
+		
+	40: // assign values
+		_minorCalculated := fbEllipse.minor;
+		_majorCalculated := fbEllipse.major;
+		_xEllipseCenter := fbEllipse.centrex;
+		_yEllipseCenter := fbEllipse.centrey;
+		nIndex := 50;
+	50: // done state
+		Compute := 1;		
+	60: // didn't find the pattern, so can't compute a peak
+		Compute := -1;					
+END_CASE]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="CutLengthWithOffset" Id="{b454241c-1d74-4f31-a305-41796035a30d}">
+      <Declaration><![CDATA[PROPERTY CutLengthWithOffset : LREAL]]></Declaration>
+      <Get Name="Get" Id="{28adb857-d7ba-41a8-9a50-8a94af4a60a3}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[CutLengthWithOffset := _CutLengthWithOffset;]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="DeltaXmmWithOffset" Id="{a355d9c0-b275-4ede-94bc-4d7ced197860}">
+      <Declaration><![CDATA[PROPERTY DeltaXmmWithOffset : LREAL]]></Declaration>
+      <Get Name="Get" Id="{0b155c76-beb9-496c-9de0-09505182dbfa}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[DeltaXmmWithOffset := _DeltaXmmWithOffset;
+]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="DeltaYmmWithOffset" Id="{1638acf8-e7a1-4300-b8d2-17caa2f29476}">
+      <Declaration><![CDATA[PROPERTY DeltaYmmWithOffset : LREAL]]></Declaration>
+      <Get Name="Get" Id="{1a4f4740-3f40-4eef-945b-008971e7f564}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[DeltaYmmWithOffset := _DeltaYmmWithOffset;]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="Fail" Id="{00e3ce85-e94d-4899-a632-72a1ffd4c881}">
+      <Declaration><![CDATA[PROPERTY Fail : BOOL]]></Declaration>
+      <Get Name="Get" Id="{5440d75f-b626-49d3-92f7-2739997c7a0b}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[Fail := _fail;
+]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{106c6fe7-b712-467c-bb5a-172fb08dea35}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[_fail := Fail;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Method Name="FB_init" Id="{9bcee5cd-fdb6-467b-a10e-19b74865c7d4}">
+      <Declaration><![CDATA[METHOD FB_init : BOOL
+VAR_INPUT
+	bInitRetains : BOOL; // if TRUE, the retain variables are initialized (warm start / cold start)
+	bInCopyCode : BOOL;  // if TRUE, the instance afterwards gets moved into the copy code (online change)
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF NOT fbMessageChange.EqualsToEventEntryEx(stOther := TC_EVENTS.SlitterEvents.ParameterChange) THEN
+	fbMessageChange.CreateEx(TC_EVENTS.SlitterEvents.ParameterChange, 0);
+	fbMessageChange.ipArguments.Clear();
+END_IF
+
+IF NOT fbMessageLoaded.EqualsToEventEntryEx(stOther := TC_EVENTS.SlitterEvents.ParametersLoadedFromFile) THEN
+	fbMessageLoaded.CreateEx(TC_EVENTS.SlitterEvents.ParametersLoadedFromFile, 0);
+	fbMessageLoaded.ipArguments.Clear().AddString('Camera');
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="GetCameraData" Id="{196673c8-e986-4d26-9da6-677accad1607}">
+      <Declaration><![CDATA[METHOD GetCameraData : INT
+VAR_INPUT
+END_VAR
+
+VAR_INST
+	i				: INT;
+	fbMBRegRead		: FB_MBReadRegs;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[// format on Cognex needs to be little endian 
+GetCameraData := 0;
+fbMBRegRead.bExecute := TRUE;
+
+fbMBRegRead.sIPAddr := GVL.CameraIpAddress;
+fbMBRegRead.nTCPPort := 502;
+fbMBRegRead.nUnitID := 16#FF;
+fbMBRegRead.nQuantity := 94; // 188/2;
+fbMBRegRead.nMBAddr := GVL.ModbusReadOffset+5;
+fbMBRegRead.cbLength := SIZEOF(CameraData.Results);
+fbMBRegRead.pDestAddr := ADR(CameraData.Results);
+
+fbMBRegRead();
+
+IF NOT fbMBRegRead.bBusy THEN
+	IF NOT fbMBRegRead.bError THEN
+		fbMBRegRead(bExecute := FALSE);
+		FOR i := 1 TO GVL.NumberVisionPoints DO
+			_yPoints[i] := REAL_TO_LREAL(CameraData.Results.PointValueRow[i]);
+			_xPoints[i] := REAL_TO_LREAL(CameraData.Results.PointValueColumn[i]);
+			_displayVisionPts[1,i] := INT_TO_LREAL(LREAL_TO_INT(_xPoints[i]*100))/100.0; // column values
+			_displayVisionPts[2,i] := INT_TO_LREAL(LREAL_TO_INT(_yPoints[i]*100))/100.0; // row values	
+		END_FOR
+
+		GetCameraData := 1;	
+	ELSE
+		fbMBRegRead(bExecute := FALSE);
+		FOR i := 1 TO GVL.NumberVisionPoints DO
+			_xPoints[i] := 0;
+			_yPoints[i] := 0;
+			_displayVisionPts[1,i] := 0;
+			_displayVisionPts[2,i] := 0;
+	
+		END_FOR
+		GetCameraData := -1;	
+		
+	END_IF
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="Inspect" Id="{afb340ef-d650-47e6-aff6-56214386a178}">
+      <Declaration><![CDATA[METHOD Inspect : INT
+VAR_INPUT
+	Execute	: BOOL;
+END_VAR
+VAR_INST
+	nIndex 	: INT;
+	rTrig	: R_TRIG;
+	CountStart : REAL;
+	CountFinish : REAL;
+	Count	: REAL;
+	CameraTON	: TON := (PT := T#250MS);
+	CameraDataResult : INT;
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	Inspect := 0;
+	nIndex := 10;
+	Trigger := FALSE;
+	Compute(Execute := FALSE);
+	CameraTON(IN := FALSE);
+END_IF
+
+IF NOT Execute THEN
+	nIndex := 0;
+END_IF
+
+CASE nIndex OF
+	0: // idle state
+		Inspect := 0;
+	10: // trigger the camera
+		IF GetCameraData() = 1 THEN
+			Count := CameraData.Results.Count;
+			CountStart := CameraData.Results.Count;
+			nIndex := 11;
+		END_IF
+	11: // trigger camera
+		Trigger := TRUE;
+		nIndex := 12;
+	12: // wait 250 ms
+		CameraTON.IN := TRUE;
+		IF CameraTON.Q THEN
+			CameraTON.IN := FALSE;
+			nIndex := 15;
+		END_IF
+		CameraTON();
+	15: // wait for data to be updated
+		CameraDataResult := GetCameraData();
+		IF CameraDataResult = 1 THEN
+			IF Count <> CameraData.Results.Count THEN
+				CountFinish := CameraData.Results.Count;
+				nIndex := 20;
+				Trigger := FALSE;
+			END_IF
+		END_IF
+	20: // Gather the data and analyze locations, etc.
+		CameraDataResult := Compute(Execute := TRUE);
+		IF CameraDataResult = 1 THEN	// could compute b/c found pattern
+			Compute(Execute := FALSE);
+			nIndex := 30;	
+		ELSIF CameraDataResult = -1 THEN	// could not comput b/c no pattern found
+			Compute(Execute := FALSE);
+			nIndex := 50;
+		END_IF
+	30: // compute pass fail
+		IF PassFail() THEN	// true = pass
+			_pass := TRUE;
+			_fail := FALSE;
+			_noDetect := FALSE;
+		ELSE
+			_pass := FALSE;
+			_fail := TRUE;
+			_noDetect := FALSE;
+		END_IF
+		nIndex := 40;
+	40: // done state
+		Inspect := 1;
+	50: // error state
+		Inspect := -1;
+		_noDetect := TRUE;		
+		_pass := FALSE;
+		_fail := FALSE;		
+END_CASE]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="MonitorParameters" Id="{8de04281-1ba7-4484-b717-19caaf5ae689}" FolderPath="Parameters\">
+      <Declaration><![CDATA[METHOD MonitorParameters : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[IF angle <> _hmiParameters.angle THEN
+	angle := _hmiParameters.angle;
+END_IF
+
+IF CalibrationDistance <> _hmiParameters.calibrationDistance THEN
+	CalibrationDistance := _hmiParameters.calibrationDistance;
+END_IF
+
+IF pitchColumn <> _hmiParameters.pitchColumn THEN
+	pitchColumn := _hmiParameters.pitchColumn;
+END_IF
+
+IF pitchRow <> _hmiParameters.pitchRow THEN
+	pitchRow := _hmiParameters.pitchRow;
+END_IF]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="NoDetect" Id="{20e83035-70d3-4a21-9b8e-71e1ba4c26ab}">
+      <Declaration><![CDATA[PROPERTY NoDetect : BOOL]]></Declaration>
+      <Get Name="Get" Id="{44d3ded5-83e8-40c5-a078-604500e88c36}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[NoDetect := _noDetect;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{7d900a17-473a-467b-afa0-dc329071e819}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[_noDetect := NoDetect;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="Parameters" Id="{0a912b95-5702-423f-ad14-f73625868c44}" FolderPath="Parameters\">
+      <Declaration><![CDATA[PROPERTY Parameters : ST_CameraParameters]]></Declaration>
+      <Get Name="Get" Id="{9004d6db-23fd-4a0e-acca-0c657f2ab045}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[Parameters := _parameters;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{0c0dd0c0-9c65-4816-83c9-62c59ac11cf5}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[_parameters := Parameters;
+_hmiParameters := Parameters;
+fbMessageLoaded.Send(0);]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="Pass" Id="{e23aae12-0dd3-45cb-8509-aca8f81a2b79}">
+      <Declaration><![CDATA[PROPERTY Pass : BOOL]]></Declaration>
+      <Get Name="Get" Id="{5c452049-6ba1-48a5-afec-c835cf5432b7}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[Pass := _pass;
+]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{42838619-486c-482b-ae24-9fe96a670a6b}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[_pass := Pass;
+]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Method Name="PassFail" Id="{fd5bc711-f02b-40fe-bb25-b8c1462f30e0}">
+      <Declaration><![CDATA[METHOD PassFail : BOOL
+VAR_INPUT
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[PassFail := TRUE; // set to pass and overwrite if anything causes failure;
+
+// cut length
+IF _tubeParameters.AdjustmentLength + CutLength > _tubeParameters.MaxLength OR
+	_tubeParameters.AdjustmentLength + CutLength < _tubeParameters.MinLength THEN
+		PassFail := FALSE;
+END_IF
+
+// delta x
+IF ABS(_tubeParameters.AdjustmentX + DeltaXmm) > _tubeParameters.ResultToleranceX THEN
+	PassFail := FALSE;
+END_IF
+
+// delta y
+IF ABS(_tubeParameters.AdjustmentY + DeltaYmm) > _tubeParameters.ResultToleranceY THEN
+	PassFail := FALSE;
+END_IF
+
+// height
+IF CutHeight < _tubeParameters.MinHeight OR CutHeight > _tubeParameters.MaxHeight THEN
+	PassFail := FALSE;
+END_IF
+
+]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="PatternMatchX" Id="{e856e423-371b-459d-96cd-c9c3a9871218}">
+      <Declaration><![CDATA[PROPERTY PatternMatchX : LREAL]]></Declaration>
+      <Get Name="Get" Id="{db3578a3-2e6c-4db5-b9ea-da8eaa4b62e5}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[PatternMatchX := REAL_TO_LREAL(CameraData.Results.PatternMatchColumn);]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="PatternMatchY" Id="{f794541b-d0f4-43f5-9989-f5b72f46a724}">
+      <Declaration><![CDATA[PROPERTY PatternMatchY : LREAL]]></Declaration>
+      <Get Name="Get" Id="{afe4b227-5eb1-4637-8576-982aaa1d7cee}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[PatternMatchY := REAL_TO_LREAL(CameraData.Results.PatternMatchRow);]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="PatternX1" Id="{34a1f4f2-d6c3-40ba-a56f-6e8bac116405}">
+      <Declaration><![CDATA[PROPERTY PatternX1 : LREAL]]></Declaration>
+      <Get Name="Get" Id="{aca48926-3280-4f5d-9704-de65a56549f7}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[PatternX1 := _patternX1;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{71d553df-b96f-404c-adc2-a73157f57b7a}">
+        <Declaration><![CDATA[
+VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[_patternX1 := PatternX1;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="PatternX2" Id="{f6e6ef21-611a-49fd-b20d-6fa0e51ee685}">
+      <Declaration><![CDATA[PROPERTY PatternX2 : LREAL]]></Declaration>
+      <Get Name="Get" Id="{ceb1abeb-4be0-4990-ab6b-2bb8e6d573f9}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[PatternX2 := _patternX2;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{06302c94-72d4-4a46-8071-c1d6c8020f7f}">
+        <Declaration><![CDATA[
+VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[_patternX2 := PatternX2;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="PatternX3" Id="{3f489872-a246-4f21-8a7b-d024b4b714c3}">
+      <Declaration><![CDATA[PROPERTY PatternX3 : LREAL]]></Declaration>
+      <Get Name="Get" Id="{5d750c6a-9c90-4cd6-b09d-26abb56916fa}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[PatternX3 := _patternX3;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{72d5c483-34b4-4d23-9625-06173b7466de}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[_patternX3 := PatternX3;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="PatternY1" Id="{0625def3-faa7-4cce-961b-14de7462443d}">
+      <Declaration><![CDATA[PROPERTY PatternY1 : LREAL]]></Declaration>
+      <Get Name="Get" Id="{51ba8222-4e92-47bc-a423-7b36abb6dc7f}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[PatternY1 := _patternY1;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{8a6a9157-340a-46de-9ae8-8d516456b3c6}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[_patternY1 := PatternY1;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="PatternY2" Id="{bac46706-290a-454b-b2b6-45489dbfb721}">
+      <Declaration><![CDATA[PROPERTY PatternY2 : LREAL]]></Declaration>
+      <Get Name="Get" Id="{93812042-9add-4a65-8b67-67111a707288}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[PatternY2 := _patternY2;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{30a03a69-0055-406a-a28e-0a5368bf59ba}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[_patternY2 := PatternY2;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="PatternY3" Id="{2994abb7-2d25-4e87-a172-de7ded7dd3ba}">
+      <Declaration><![CDATA[PROPERTY PatternY3 : LREAL]]></Declaration>
+      <Get Name="Get" Id="{89b27ac1-e922-43f4-a5d0-4ea216603666}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[PatternY3 := _patternY3;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{b4e772fc-cc30-4535-b999-b96bc0cf7943}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[_patternY3 := PatternY3;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="pitchColumn" Id="{9a251985-6952-4587-8a62-c2789e7fe16a}" FolderPath="Parameters\">
+      <Declaration><![CDATA[PROPERTY pitchColumn : LREAL]]></Declaration>
+      <Get Name="Get" Id="{9a70de58-d5e8-4958-8a9f-5bd64f861a81}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[pitchColumn := _parameters.pitchColumn;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{e881a551-ee32-4f57-b2cf-a73f32117acd}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[fbMessageChange.ipArguments.Clear().AddString('pitchColumn').AddLReal(_parameters.pitchColumn).AddLReal(pitchColumn);
+fbMessageChange.Send(0);
+_parameters.pitchColumn := pitchColumn;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="PitchMmToPixel" Id="{fb91ea54-ce4d-40c4-af64-be5e57a50eb3}">
+      <Declaration><![CDATA[PROPERTY PitchMmToPixel : LREAL]]></Declaration>
+      <Get Name="Get" Id="{c424417a-2fa7-4a18-ab34-5982a15bc656}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[PitchMmToPixel := _hmiParameters.pitchRow;]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="pitchRow" Id="{035ad7e2-9f28-41de-8283-767f0518893e}" FolderPath="Parameters\">
+      <Declaration><![CDATA[PROPERTY pitchRow : LREAL]]></Declaration>
+      <Get Name="Get" Id="{5ba2f54a-a285-4cef-853a-57bbf819858f}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[pitchRow := _parameters.pitchRow;
+]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{d9843d7d-e848-4635-91ec-9b88afcf8a15}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[fbMessageChange.ipArguments.Clear().AddString('pitchRow').AddLReal(_parameters.pitchRow).AddLReal(pitchRow);
+fbMessageChange.Send(0);
+_parameters.pitchRow := pitchRow;]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Method Name="SelectCameraProgram" Id="{00e1d34d-f3f7-42d4-99f2-f1957dfadecb}">
+      <Declaration><![CDATA[METHOD SelectCameraProgram : INT
+VAR_INPUT
+	Execute	: BOOL;
+END_VAR
+VAR_INST
+	fbMBRegWrite 	: FB_MBWriteRegs;	// for writing command, name; offset is 2000
+	fbMBCoilWrite	: FB_MBWriteCoils;	// for writing vision control; offset is 0
+	fbMBReadInputs 	: FB_MBReadInputs; 	// for reading vision status; offset is 0
+	nIndex			: INT;
+	rTrig			: R_TRIG;
+	JobLoadByName 	: WORD := 16#4000;
+	temp 			: UDINT := 0;
+	info 			: BOOL;
+	i 				: WORD;
+	strJobName 		: STRING;
+	Message			: STRING(255);
+	ErrorId			: UDINT;
+	nQuantity 		: WORD;
+	cbLength 		: UDINT;	
+	attempt			: INT;
+	attempt2		: INT;	
+END_VAR
+VAR
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	nIndex := 10;
+	Message := '';
+	ErrorId := 0;
+	Attempt := 0;
+	Attempt2 := 0;
+	fbMBCoilWrite(
+		bExecute := FALSE,
+		sIPAddr := GVL.CameraIpAddress,
+		nTCPPort := 502,
+		nUnitID := 16#FF);
+	fbMBRegWrite(
+		bExecute := FALSE,
+		sIPAddr := GVL.CameraIpAddress,
+		nTCPPort := 502,
+		nUnitID := 16#FF);
+	fbMBReadInputs(
+		bExecute := FALSE,
+		sIPAddr := GVL.CameraIpAddress,
+		nTCPPort := 502,
+		nUnitID := 16#FF);
+END_IF
+
+IF NOT Execute THEN
+	nIndex := 0;
+END_IF
+
+CASE nIndex OF
+	0: // idle state
+		SelectCameraProgram := 0;
+	10: // check if the program needs to change
+		IF _previousTubeIndex = _tubeParameters.Index THEN
+			nIndex := 75;
+		ELSE
+			nIndex := 15;
+		END_IF
+	15: // Reset everything to zero
+		fbMBCoilWrite(
+			nQuantity := 32,
+			nMBAddr := 0,
+			cbLength := 4,
+			pSrcAddr := ADR(temp),
+			bExecute := TRUE);
+		IF NOT fbMBCoilWrite.bBusy THEN
+			fbMBCoilWrite(bExecute := FALSE);
+			nIndex := 20;
+		END_IF
+		IF fbMBCoilWrite.bError THEN
+			Message := 'Error in state 15';
+			ErrorId := fbMBCoilWrite.nErrId;
+			fbMBCoilWrite(bExecute := FALSE);
+			nIndex := 85;
+		END_IF
+	20: // place camera offline by setting the set offline bit high 
+		// modbus coil offset is 0
+		// byte 0, bit 7 is the bit for forcing the camera to be offline
+		info := TRUE;
+		fbMBCoilWrite(
+			sIPAddr := GVL.CameraIpAddress,
+			nTCPPort := 502,
+			nUnitID := 16#FF,
+			nQuantity := 1,
+			nMBAddr := 7,
+			cbLength := 1,
+			pSrcAddr := ADR(Info),
+			bExecute := TRUE);
+		IF NOT fbMBCoilWrite.bBusy THEN
+			fbMBCoilWrite(bExecute := FALSE);
+			nIndex := 30;
+			END_IF
+		IF fbMBCoilWrite.bError THEN
+			Message := 'Error in state 20';
+			ErrorId := fbMBCoilWrite.nErrId;
+			fbMBCoilWrite(bExecute := FALSE);
+			nIndex := 85;
+		END_IF		
+	30: // write the job load by name command into Word 0 of the input block 
+		// job load by name command is 0x4000
+		// this goes into holding register start which is at 2000
+		fbMBRegWrite(
+			nQuantity := 1,
+			nMBAddr := GVL.ModbusWriteOffset,
+			cbLength := 2,
+			pSrcAddr := ADR(JobLoadByName),
+			bExecute := TRUE);
+		IF NOT fbMBRegWrite.bBusy THEN
+			fbMBRegWrite(bExecute := FALSE);
+			attempt := attempt + 1;
+			IF attempt > 2 THEN
+				attempt := 0;
+				nIndex := 40;
+			END_IF
+		END_IF
+		IF fbMBRegWrite.bError THEN
+			Message := 'Error in state 30';
+			ErrorId := fbMBRegWrite.nErrId;
+			fbMBRegWrite(bExecute := FALSE);
+			nIndex := 85;
+
+		END_IF
+	40: // write the job name to Word 1 - 2000 (UserData).  Job name must be null terminated
+		// a 0 must be in the byte immediately following the job name
+		strJobName := CONCAT('SDCARD/Tube', INT_TO_STRING(_tubeParameters.Index));
+		strJobName := CONCAT(strJobName, '.job');
+		cbLength := 18; // INT_TO_UDINT(LEN(strJobName) + 1);
+		nQuantity := 9; //REAL_TO_WORD(UDINT_TO_REAL(cbLength)/2);
+		fbMBRegWrite(
+			bExecute := TRUE,
+			nQuantity := nQuantity,
+			nMBAddr := GVL.ModbusWriteOffset + 1,
+	//		nQuantity := nQuantity, // number of words
+			cbLength := cbLength, // byte size
+			pSrcAddr := ADR(strJobName));
+		IF NOT fbMBRegWrite.bBusy THEN
+			fbMBRegWrite(bExecute := FALSE);
+			nIndex := 50;
+		END_IF			
+		IF fbMBRegWrite.bError THEN
+			Message := 'Error in state 40';
+			ErrorId := fbMBRegWrite.nErrId;
+			fbMBRegWrite(bExecute := FALSE);
+			Attempt2 := Attempt2 + 1;
+			IF attempt2 > 2 THEN
+				nIndex := 85;
+			END_IF
+		END_IF
+		
+	50: // Set the Execute Command bit in the vision control block
+		//VisionControl.ExecuteCommand := TRUE;
+		// Byte 0, bit 4 of vision control 
+		info := TRUE;
+		fbMBCoilWrite(
+			nQuantity := 1,
+			nMBAddr := 4,
+			cbLength := 1,
+			pSrcAddr := ADR(Info),
+			bExecute := TRUE);
+		IF NOT fbMBCoilWrite.bBusy THEN
+			fbMBCoilWrite(bExecute := FALSE);
+			nIndex := 60;
+		END_IF
+		IF fbMBCoilWrite.bError	THEN
+			fbMBCoilWrite(bExecute := FALSE);
+			nIndex := 85;
+			Message := 'error in state 50';
+			errorid := fbMBCoilWrite.nErrId;
+		END_IF
+	60: // wait for command complete of command failed to be set before clearing the execute
+		// command bit and the offline bit
+		fbMBReadInputs(
+			sIPAddr := GVL.CameraIpAddress,
+			nTCPPort := 502,
+			nUnitID := 16#FF,
+			nQuantity := 32,
+			nMBAddr := 0,
+			cbLength := 4,
+			pDestAddr := ADR(VisionStatus),
+			bExecute := TRUE);
+		IF NOT fbMBReadInputs.bBusy THEN
+			fbMBReadInputs(bExecute := FALSE);
+			IF VisionStatus[1].6 OR VisionStatus[1].5 THEN
+				nIndex := 70;
+				IF VisionStatus[1].6 THEN
+					nIndex := 80;
+					Message := 'VisionSatus[1].6 is true.';
+				END_IF
+			END_IF
+		END_IF
+		IF fbMBReadInputs.bError THEN
+			fbMBReadInputs(bExecute := FALSE);
+			nIndex := 85;
+			Errorid := fbMBReadInputs.nErrId;
+			Message := 'errror in state 60.';
+		END_IF
+	70: // done state
+		fbMBCoilWrite(
+			nQuantity := 32,
+			nMBAddr := 0,
+			cbLength := 4,
+			pSrcAddr := ADR(temp),
+			bExecute := TRUE);
+		IF NOT fbMBCoilWrite.bBusy THEN
+			fbMBCoilWrite(bExecute := FALSE);
+			nIndex := 75;
+		END_IF
+		IF fbMBCoilWrite.bError THEN
+			fbMBCoilWrite(bExecute := FALSE);
+			nIndex := 85;
+			Message := 'error in state 70';
+			ErrorID := fbMBCoilWrite.nErrId;			
+		END_IF
+	75: // done state
+		_previousTubeIndex := _tubeParameters.Index;
+		SelectCameraProgram := 1;
+	80: // error state
+		fbMBCoilWrite(
+			nQuantity := 32,
+			nMBAddr := 0,
+			cbLength := 4,
+			pSrcAddr := ADR(temp),
+			bExecute := TRUE);
+		IF NOT fbMBCoilWrite.bBusy THEN
+			fbMBCoilWrite(bExecute := FALSE);
+			nIndex := 85;
+		END_IF
+
+	85: // error state
+		SelectCameraProgram := -1;
+END_CASE
+
+
+
+
+
+(*
+SelectCameraProgram := 0;
+fbMBRegWrite.bExecute := TRUE;
+
+fbMBRegWrite.sIPAddr := GVL.CameraIpAddress;
+fbMBRegWrite.nTCPPort := 502;
+fbMBRegWrite.nUnitID := 16#FF;
+fbMBRegWrite.nQuantity := 2; // words to write
+fbMBRegWrite.nMBAddr := GVL.ModbusWriteOffset;
+fbMBRegWrite.cbLength := SIZEOF(_tubeSelection);
+fbMBRegWrite.pSrcAddr := ADR(_tubeSelection);
+
+fbMBRegWrite();
+
+IF NOT fbMBRegWrite.bBusy THEN
+	IF NOT fbMBRegWrite.bError THEN
+		fbMBRegWrite(bExecute := FALSE);
+		SelectCameraProgram := 1;
+	ELSE
+		fbMBRegWrite(bExecute := FALSE);
+		SelectCameraProgram := -1;		
+	END_IF
+END_IF
+*)]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="TriggerCamera" Id="{9239a2ac-48e0-4f63-b1b4-182558d5e90b}">
+      <Declaration><![CDATA[METHOD TriggerCamera : BOOL
+VAR_INPUT
+	Execute	: BOOL;
+END_VAR
+VAR_INST
+	rTrig	: R_TRIG;
+	nIndex	: INT;
+	Counter	: REAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[rTrig(CLK := Execute);
+IF rTrig.Q THEN
+	nIndex := 10;
+	Trigger	:= FALSE;
+END_IF
+
+IF NOT Execute THEN
+	nIndex := 0;
+END_IF
+
+CASE nIndex OF
+	0: // idle state
+		TriggerCamera := FALSE;
+	10: // get the camera count
+		IF GetCameraData() = 1 THEN
+			Counter := CameraData.Results.Count;
+			nIndex := 20;
+		END_IF
+	20: // trigger the camera	
+		Trigger := TRUE;
+		IF GetCameraData() = 1 THEN
+			nIndex := 30;
+		END_IF
+	30: // updated?
+		IF Counter <> CameraData.Results.Count THEN
+			Trigger := FALSE;
+			nIndex := 40;
+		ELSE
+			nIndex := 20;
+		END_IF
+	40: // done state
+		TriggerCamera := TRUE;
+END_CASE]]></ST>
+      </Implementation>
+    </Method>
+    <Property Name="TubeParameters" Id="{400ab4f1-96e8-4818-a86c-ef0f62c8cde6}">
+      <Declaration><![CDATA[PROPERTY TubeParameters : ST_TubeParameters]]></Declaration>
+      <Get Name="Get" Id="{5df344ac-de22-402d-9618-4c0f5046ddaf}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[TubeParameters := _tubeParameters;]]></ST>
+        </Implementation>
+      </Get>
+      <Set Name="Set" Id="{b5d2b68a-f3e6-45a3-bebc-0314a00bb16a}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[_tubeParameters := TubeParameters;
+]]></ST>
+        </Implementation>
+      </Set>
+    </Property>
+    <Property Name="xEllipseCenter" Id="{86f1bf78-74fd-43c9-9b64-b7e7835b5035}">
+      <Declaration><![CDATA[PROPERTY xEllipseCenter : LREAL]]></Declaration>
+      <Get Name="Get" Id="{839c6b74-3a8b-4dab-8bc3-0baf0a96597f}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[xEllipseCenter := _xEllipseCenter;]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <Property Name="yEllipseCenter" Id="{bc3ea8e2-c6ec-4170-acbe-bd54fe16cf38}">
+      <Declaration><![CDATA[PROPERTY yEllipseCenter : LREAL]]></Declaration>
+      <Get Name="Get" Id="{2d0da89b-5f70-401e-b43d-d9ca521ee0ea}">
+        <Declaration><![CDATA[VAR
+END_VAR
+]]></Declaration>
+        <Implementation>
+          <ST><![CDATA[yEllipseCenter := _yEllipseCenter;]]></ST>
+        </Implementation>
+      </Get>
+    </Property>
+    <LineIds Name="FB_Camera">
+      <LineId Id="102" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.angle.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.angle.Set">
+      <LineId Id="5" Count="1" />
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.Calibrate">
+      <LineId Id="16" Count="0" />
+      <LineId Id="20" Count="0" />
+      <LineId Id="15" Count="0" />
+      <LineId Id="14" Count="0" />
+      <LineId Id="10" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.CalibrationDistance.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.CalibrationDistance.Set">
+      <LineId Id="5" Count="1" />
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.CameraProgram.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.CameraProgram.Set">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.Compute">
+      <LineId Id="200" Count="0" />
+      <LineId Id="202" Count="0" />
+      <LineId Id="201" Count="0" />
+      <LineId Id="116" Count="15" />
+      <LineId Id="253" Count="0" />
+      <LineId Id="260" Count="0" />
+      <LineId Id="254" Count="0" />
+      <LineId Id="256" Count="0" />
+      <LineId Id="258" Count="1" />
+      <LineId Id="257" Count="0" />
+      <LineId Id="261" Count="1" />
+      <LineId Id="264" Count="1" />
+      <LineId Id="263" Count="0" />
+      <LineId Id="132" Count="2" />
+      <LineId Id="170" Count="0" />
+      <LineId Id="177" Count="0" />
+      <LineId Id="220" Count="1" />
+      <LineId Id="169" Count="0" />
+      <LineId Id="198" Count="0" />
+      <LineId Id="218" Count="0" />
+      <LineId Id="237" Count="0" />
+      <LineId Id="195" Count="1" />
+      <LineId Id="199" Count="0" />
+      <LineId Id="178" Count="0" />
+      <LineId Id="175" Count="1" />
+      <LineId Id="174" Count="0" />
+      <LineId Id="219" Count="0" />
+      <LineId Id="153" Count="13" />
+      <LineId Id="266" Count="0" />
+      <LineId Id="21" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.CutLengthWithOffset.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.DeltaXmmWithOffset.Get">
+      <LineId Id="2" Count="0" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.DeltaYmmWithOffset.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.Fail.Get">
+      <LineId Id="2" Count="0" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.Fail.Set">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.FB_init">
+      <LineId Id="7" Count="1" />
+      <LineId Id="10" Count="0" />
+      <LineId Id="9" Count="0" />
+      <LineId Id="12" Count="0" />
+      <LineId Id="11" Count="0" />
+      <LineId Id="13" Count="0" />
+      <LineId Id="15" Count="0" />
+      <LineId Id="14" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.GetCameraData">
+      <LineId Id="130" Count="0" />
+      <LineId Id="22" Count="0" />
+      <LineId Id="5" Count="0" />
+      <LineId Id="12" Count="0" />
+      <LineId Id="11" Count="0" />
+      <LineId Id="14" Count="1" />
+      <LineId Id="13" Count="0" />
+      <LineId Id="6" Count="0" />
+      <LineId Id="16" Count="0" />
+      <LineId Id="9" Count="0" />
+      <LineId Id="17" Count="0" />
+      <LineId Id="10" Count="0" />
+      <LineId Id="19" Count="0" />
+      <LineId Id="18" Count="0" />
+      <LineId Id="108" Count="0" />
+      <LineId Id="20" Count="0" />
+      <LineId Id="102" Count="0" />
+      <LineId Id="30" Count="0" />
+      <LineId Id="103" Count="0" />
+      <LineId Id="106" Count="1" />
+      <LineId Id="104" Count="0" />
+      <LineId Id="144" Count="0" />
+      <LineId Id="23" Count="0" />
+      <LineId Id="109" Count="0" />
+      <LineId Id="112" Count="7" />
+      <LineId Id="129" Count="0" />
+      <LineId Id="110" Count="1" />
+      <LineId Id="21" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.Inspect">
+      <LineId Id="5" Count="0" />
+      <LineId Id="13" Count="0" />
+      <LineId Id="164" Count="0" />
+      <LineId Id="14" Count="0" />
+      <LineId Id="27" Count="0" />
+      <LineId Id="66" Count="0" />
+      <LineId Id="122" Count="0" />
+      <LineId Id="15" Count="0" />
+      <LineId Id="17" Count="0" />
+      <LineId Id="16" Count="0" />
+      <LineId Id="18" Count="1" />
+      <LineId Id="21" Count="0" />
+      <LineId Id="20" Count="0" />
+      <LineId Id="22" Count="0" />
+      <LineId Id="24" Count="1" />
+      <LineId Id="127" Count="0" />
+      <LineId Id="132" Count="1" />
+      <LineId Id="128" Count="2" />
+      <LineId Id="26" Count="0" />
+      <LineId Id="47" Count="0" />
+      <LineId Id="114" Count="1" />
+      <LineId Id="117" Count="1" />
+      <LineId Id="120" Count="0" />
+      <LineId Id="119" Count="0" />
+      <LineId Id="121" Count="0" />
+      <LineId Id="48" Count="0" />
+      <LineId Id="147" Count="0" />
+      <LineId Id="49" Count="0" />
+      <LineId Id="51" Count="0" />
+      <LineId Id="126" Count="0" />
+      <LineId Id="52" Count="3" />
+      <LineId Id="33" Count="0" />
+      <LineId Id="153" Count="0" />
+      <LineId Id="37" Count="0" />
+      <LineId Id="67" Count="0" />
+      <LineId Id="77" Count="0" />
+      <LineId Id="154" Count="2" />
+      <LineId Id="68" Count="0" />
+      <LineId Id="38" Count="0" />
+      <LineId Id="89" Count="0" />
+      <LineId Id="99" Count="1" />
+      <LineId Id="161" Count="0" />
+      <LineId Id="102" Count="2" />
+      <LineId Id="162" Count="0" />
+      <LineId Id="105" Count="0" />
+      <LineId Id="101" Count="0" />
+      <LineId Id="87" Count="0" />
+      <LineId Id="78" Count="0" />
+      <LineId Id="151" Count="1" />
+      <LineId Id="163" Count="0" />
+      <LineId Id="157" Count="1" />
+      <LineId Id="23" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.MonitorParameters">
+      <LineId Id="5" Count="2" />
+      <LineId Id="9" Count="0" />
+      <LineId Id="8" Count="0" />
+      <LineId Id="10" Count="1" />
+      <LineId Id="13" Count="0" />
+      <LineId Id="12" Count="0" />
+      <LineId Id="14" Count="1" />
+      <LineId Id="17" Count="0" />
+      <LineId Id="16" Count="0" />
+      <LineId Id="18" Count="1" />
+    </LineIds>
+    <LineIds Name="FB_Camera.NoDetect.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.NoDetect.Set">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.Parameters.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.Parameters.Set">
+      <LineId Id="2" Count="0" />
+      <LineId Id="8" Count="0" />
+      <LineId Id="7" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.Pass.Get">
+      <LineId Id="2" Count="0" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.Pass.Set">
+      <LineId Id="2" Count="0" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.PassFail">
+      <LineId Id="6" Count="0" />
+      <LineId Id="38" Count="0" />
+      <LineId Id="7" Count="0" />
+      <LineId Id="5" Count="0" />
+      <LineId Id="9" Count="0" />
+      <LineId Id="11" Count="0" />
+      <LineId Id="10" Count="0" />
+      <LineId Id="13" Count="0" />
+      <LineId Id="12" Count="0" />
+      <LineId Id="14" Count="2" />
+      <LineId Id="21" Count="0" />
+      <LineId Id="18" Count="0" />
+      <LineId Id="17" Count="0" />
+      <LineId Id="19" Count="1" />
+      <LineId Id="26" Count="0" />
+      <LineId Id="25" Count="0" />
+      <LineId Id="27" Count="2" />
+      <LineId Id="34" Count="0" />
+      <LineId Id="36" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.PatternMatchX.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.PatternMatchY.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.PatternX1.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.PatternX1.Set">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.PatternX2.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.PatternX2.Set">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.PatternX3.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.PatternX3.Set">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.PatternY1.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.PatternY1.Set">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.PatternY2.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.PatternY2.Set">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.PatternY3.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.PatternY3.Set">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.pitchColumn.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.pitchColumn.Set">
+      <LineId Id="5" Count="1" />
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.PitchMmToPixel.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.pitchRow.Get">
+      <LineId Id="2" Count="0" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.pitchRow.Set">
+      <LineId Id="5" Count="1" />
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.SelectCameraProgram">
+      <LineId Id="82" Count="0" />
+      <LineId Id="88" Count="1" />
+      <LineId Id="408" Count="1" />
+      <LineId Id="411" Count="0" />
+      <LineId Id="417" Count="0" />
+      <LineId Id="146" Count="0" />
+      <LineId Id="254" Count="0" />
+      <LineId Id="256" Count="2" />
+      <LineId Id="212" Count="0" />
+      <LineId Id="217" Count="0" />
+      <LineId Id="219" Count="2" />
+      <LineId Id="271" Count="0" />
+      <LineId Id="275" Count="0" />
+      <LineId Id="272" Count="2" />
+      <LineId Id="90" Count="0" />
+      <LineId Id="92" Count="0" />
+      <LineId Id="91" Count="0" />
+      <LineId Id="93" Count="1" />
+      <LineId Id="96" Count="0" />
+      <LineId Id="95" Count="0" />
+      <LineId Id="97" Count="0" />
+      <LineId Id="99" Count="0" />
+      <LineId Id="355" Count="2" />
+      <LineId Id="359" Count="1" />
+      <LineId Id="358" Count="0" />
+      <LineId Id="149" Count="0" />
+      <LineId Id="152" Count="0" />
+      <LineId Id="156" Count="8" />
+      <LineId Id="150" Count="0" />
+      <LineId Id="380" Count="0" />
+      <LineId Id="383" Count="0" />
+      <LineId Id="385" Count="1" />
+      <LineId Id="381" Count="0" />
+      <LineId Id="100" Count="0" />
+      <LineId Id="196" Count="1" />
+      <LineId Id="195" Count="0" />
+      <LineId Id="165" Count="12" />
+      <LineId Id="135" Count="0" />
+      <LineId Id="388" Count="3" />
+      <LineId Id="387" Count="0" />
+      <LineId Id="102" Count="2" />
+      <LineId Id="198" Count="0" />
+      <LineId Id="202" Count="6" />
+      <LineId Id="415" Count="0" />
+      <LineId Id="412" Count="0" />
+      <LineId Id="414" Count="0" />
+      <LineId Id="210" Count="0" />
+      <LineId Id="413" Count="0" />
+      <LineId Id="209" Count="0" />
+      <LineId Id="108" Count="0" />
+      <LineId Id="394" Count="3" />
+      <LineId Id="392" Count="1" />
+      <LineId Id="105" Count="0" />
+      <LineId Id="109" Count="0" />
+      <LineId Id="213" Count="0" />
+      <LineId Id="325" Count="0" />
+      <LineId Id="322" Count="1" />
+      <LineId Id="215" Count="0" />
+      <LineId Id="321" Count="0" />
+      <LineId Id="222" Count="1" />
+      <LineId Id="310" Count="0" />
+      <LineId Id="224" Count="0" />
+      <LineId Id="232" Count="4" />
+      <LineId Id="398" Count="3" />
+      <LineId Id="418" Count="1" />
+      <LineId Id="402" Count="2" />
+      <LineId Id="216" Count="0" />
+      <LineId Id="110" Count="0" />
+      <LineId Id="112" Count="0" />
+      <LineId Id="259" Count="0" />
+      <LineId Id="239" Count="1" />
+      <LineId Id="244" Count="9" />
+      <LineId Id="422" Count="0" />
+      <LineId Id="420" Count="0" />
+      <LineId Id="423" Count="1" />
+      <LineId Id="421" Count="0" />
+      <LineId Id="113" Count="1" />
+      <LineId Id="260" Count="0" />
+      <LineId Id="263" Count="3" />
+      <LineId Id="279" Count="0" />
+      <LineId Id="267" Count="2" />
+      <LineId Id="261" Count="0" />
+      <LineId Id="276" Count="0" />
+      <LineId Id="280" Count="0" />
+      <LineId Id="284" Count="2" />
+      <LineId Id="429" Count="0" />
+      <LineId Id="287" Count="0" />
+      <LineId Id="283" Count="0" />
+      <LineId Id="117" Count="0" />
+      <LineId Id="425" Count="0" />
+      <LineId Id="428" Count="0" />
+      <LineId Id="426" Count="0" />
+      <LineId Id="430" Count="1" />
+      <LineId Id="427" Count="0" />
+      <LineId Id="124" Count="0" />
+      <LineId Id="289" Count="9" />
+      <LineId Id="432" Count="0" />
+      <LineId Id="435" Count="0" />
+      <LineId Id="433" Count="0" />
+      <LineId Id="436" Count="1" />
+      <LineId Id="434" Count="0" />
+      <LineId Id="288" Count="0" />
+      <LineId Id="354" Count="0" />
+      <LineId Id="125" Count="1" />
+      <LineId Id="300" Count="9" />
+      <LineId Id="438" Count="0" />
+      <LineId Id="299" Count="0" />
+      <LineId Id="127" Count="0" />
+      <LineId Id="98" Count="0" />
+      <LineId Id="83" Count="4" />
+      <LineId Id="81" Count="0" />
+      <LineId Id="57" Count="20" />
+      <LineId Id="5" Count="0" />
+      <LineId Id="148" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.TriggerCamera">
+      <LineId Id="42" Count="3" />
+      <LineId Id="47" Count="9" />
+      <LineId Id="82" Count="0" />
+      <LineId Id="85" Count="0" />
+      <LineId Id="87" Count="0" />
+      <LineId Id="86" Count="0" />
+      <LineId Id="83" Count="0" />
+      <LineId Id="57" Count="0" />
+      <LineId Id="73" Count="1" />
+      <LineId Id="61" Count="0" />
+      <LineId Id="75" Count="2" />
+      <LineId Id="79" Count="2" />
+      <LineId Id="78" Count="0" />
+      <LineId Id="62" Count="1" />
+      <LineId Id="21" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.TubeParameters.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.TubeParameters.Set">
+      <LineId Id="2" Count="0" />
+      <LineId Id="5" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.xEllipseCenter.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+    <LineIds Name="FB_Camera.yEllipseCenter.Get">
+      <LineId Id="2" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>
